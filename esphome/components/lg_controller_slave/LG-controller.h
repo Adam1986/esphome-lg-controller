@@ -1184,16 +1184,19 @@ active_reservation_ = buffer[3] & 0x10;
 uint8_t timer_kind = (buffer[8] >> 3) & 0x7;
 uint32_t minutes = (uint32_t(buffer[8] & 0x7) << 8) | buffer[9];
 
-// Always process sleep timer frames, even if pending_change_ is true
+// Only update sleep timer state from AC frames without triggering a loop
 if (timer_kind == 3) {  // sleep timer
+    ignore_sleep_timer_callback_ = true;   // prevent feedback loop
     sleep_timer_.publish_state(minutes);
+    ignore_sleep_timer_callback_ = false;
 } else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
     // Cancel sleep if we had a pending target but AC cleared reservation
     sleep_timer_.publish_state(0);
 }
 
-	// Existing publish state
-	publish_state();
+// Existing publish state
+publish_state();
+
     }
 
     void process_capabilities_message(MessageSender sender, const uint8_t* buffer) {
