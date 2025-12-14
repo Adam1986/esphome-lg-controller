@@ -1180,26 +1180,30 @@ last_sent_status_millis_ = millis();
 this->target_temperature = target;
 active_reservation_ = buffer[3] & 0x10;
 
-// Extract sleep timer info from frame
-uint8_t timer_kind = (buffer[8] >> 3) & 0x7;
-uint32_t minutes = (uint32_t(buffer[8] & 0x7) << 8) | buffer[9];
+// Extract sleep timer info safely
+if (buffer_size >= 10) {  // ensure buffer has enough bytes
+    uint8_t timer_kind = (buffer[8] >> 3) & 0x07;
+    uint16_t minutes = ((buffer[8] & 0x07) << 8) | buffer[9];
 
-// Only update sleep timer state from AC frames without triggering a loop
-if (timer_kind == 3) {  // sleep timer
-    // Only update if the value changed
-    if (sleep_timer_.state != minutes) {
-        ignore_sleep_timer_callback_ = true;   // prevent feedback loop
-        sleep_timer_.publish_state(minutes);
-        ignore_sleep_timer_callback_ = false;
-    }
-} else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
-    // Cancel sleep if we had a pending target but AC cleared reservation
-    if (sleep_timer_.state != 0) {
-        sleep_timer_.publish_state(0);
+    // Only update sleep timer state if this is a sleep timer frame
+    if (timer_kind == 3) {  // sleep timer
+        // Only publish if different from current state to reduce redundant writes
+        if (sleep_timer_.state != minutes) {
+            ignore_sleep_timer_callback_ = true;   // prevent feedback loop
+            sleep_timer_.publish_state(minutes);
+            ignore_sleep_timer_callback_ = false;
+        }
+    } else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
+        // Cancel sleep if AC cleared reservation
+        if (sleep_timer_.state != 0) {
+            ignore_sleep_timer_callback_ = true;
+            sleep_timer_.publish_state(0);
+            ignore_sleep_timer_callback_ = false;
+        }
     }
 }
 
-// Existing publish state
+// Publish regular AC state
 publish_state();
 
 
