@@ -1186,16 +1186,22 @@ uint32_t minutes = (uint32_t(buffer[8] & 0x7) << 8) | buffer[9];
 
 // Only update sleep timer state from AC frames without triggering a loop
 if (timer_kind == 3) {  // sleep timer
-    ignore_sleep_timer_callback_ = true;   // prevent feedback loop
-    sleep_timer_.publish_state(minutes);
-    ignore_sleep_timer_callback_ = false;
+    // Only update if the value changed
+    if (sleep_timer_.state != minutes) {
+        ignore_sleep_timer_callback_ = true;   // prevent feedback loop
+        sleep_timer_.publish_state(minutes);
+        ignore_sleep_timer_callback_ = false;
+    }
 } else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
     // Cancel sleep if we had a pending target but AC cleared reservation
-    sleep_timer_.publish_state(0);
+    if (sleep_timer_.state != 0) {
+        sleep_timer_.publish_state(0);
+    }
 }
 
 // Existing publish state
 publish_state();
+
 
     }
 
