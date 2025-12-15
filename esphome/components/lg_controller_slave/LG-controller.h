@@ -210,6 +210,10 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // Set if this controller is configured as slave controller.
     const bool slave_;
 
+    // --- Slave-only checksum recovery ---
+    uint8_t invalid_checksum_count_{0};
+    uint32_t last_invalid_checksum_ms_{0};
+
     enum class LgCapability {
         PURIFIER,
         FAN_AUTO,
@@ -960,18 +964,41 @@ last_sent_status_millis_ = millis();
     void process_message(const uint8_t* buffer, bool* had_error) {
         ESP_LOGD(TAG, "received %s", format_hex_pretty(buffer, MsgLen).c_str());
 
-        if (calc_checksum(buffer) != buffer[12]) {
-            // When initializing, the unit sends an all-zeroes message as padding between
-            // messages. Ignore those false checksum failures.
-            auto is_zero = [](uint8_t b) { return b == 0; };
-            if (std::all_of(buffer, buffer + MsgLen, is_zero)) {
-                ESP_LOGD(TAG, "Ignoring padding message sent by unit");
-                return;
-            }
-            ESP_LOGE(TAG, "invalid checksum %s", format_hex_pretty(buffer, MsgLen).c_str());
-            *had_error = true;
-            return;
+if (calc_checksum(buffer) != buffer[12]) {
+    // Ignore all-zero padding
+    auto is_zero = [](uint8_t b) { return b == 0; };
+    if (std::all_of(buffer, buffer + MsgLen, is_zero)) {
+        ESP_LOGD(TAG, "Ignoring padding message sent by unit");
+        return;
+    }
+
+    ESP_LOGE(TAG, "invalid checksum %s", format_hex_pretty(buffer, MsgLen).c_str());
+    *had_error = true;
+
+    // --- Slave-only checksum recovery ---
+    if (slave_) {
+        uint32_t now = millis();
+
+        // reset counter if last invalid was > 5s ago
+        if (now - last_invalid_checksum_ms_ > 5000) {
+            invalid_checksum_count_ = 0;
         }
+
+        last_invalid_checksum_ms_ = now;
+        invalid_checksum_count_++;
+
+        ESP_LOGW(TAG, "Invalid checksum received, count=%d", invalid_checksum_count_);
+
+        // reboot if threshold reached
+        if (invalid_checksum_count_ >= 10) {
+            ESP_LOGE(TAG, "Too many invalid frames as slave — rebooting");
+            delay(100);
+            esp_restart();
+        }
+    }
+
+    return;
+}
 
         if (pending_send_ != PendingSendKind::None && memcmp(send_buf_, buffer, MsgLen) == 0) {
             ESP_LOGD(TAG, "verified send");
