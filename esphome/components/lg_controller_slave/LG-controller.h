@@ -1217,15 +1217,13 @@ minutes = std::min(minutes, uint16_t(420));
 if (timer_kind == 3) {  // sleep timer
     if (minutes == 0) {
         // AC cleared sleep externally
-        sleep_timer_ = 0;
+        ignore_sleep_timer_callback_ = true;
+        sleep_timer_.publish_state(0);
+        ignore_sleep_timer_callback_ = false;
         active_reservation_ = false;
         sleep_timer_target_millis_.reset();
     } else if (active_reservation_) {
         // Only decrement/countdown if we own the reservation
-        sleep_timer_ = minutes;
-    }
-
-    if (sleep_timer_.state != minutes) {
         ignore_sleep_timer_callback_ = true;
         sleep_timer_.publish_state(minutes);
         ignore_sleep_timer_callback_ = false;
@@ -1240,10 +1238,9 @@ else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
         sleep_timer_target_millis_.reset();
     }
 }
-
+        
 // Publish regular AC state
 publish_state(); 
-
 
     }
 
