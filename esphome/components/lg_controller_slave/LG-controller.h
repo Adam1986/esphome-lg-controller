@@ -196,6 +196,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     optional<uint32_t> sleep_timer_target_millis_{};
     bool active_reservation_ = false;
     bool ignore_sleep_timer_callback_ = false;
+    bool sleep_state_synced_ = false;
 
     uint32_t NVS_STORAGE_VERSION = 2843654U; // Change version if the NVSStorage struct changes
     struct NVSStorage {
@@ -1055,12 +1056,6 @@ if (calc_checksum(buffer) != buffer[12]) {
             return;
         }
 
-        // Consider slave controller initialized if we received a status message from the other
-        // controller or the unit.
-        if (slave_) {
-            is_initializing_ = false;
-        }
-
         // Handle simple input sensors first. These are safe to update even if we have a pending
         // change.
 
@@ -1209,6 +1204,28 @@ active_reservation_ = buffer[3] & 0x10;
 //Extract sleep timer info safely
 uint8_t timer_kind = (buffer[8] >> 3) & 0x07;
 uint16_t minutes = ((buffer[8] & 0x07) << 8) | buffer[9];
+
+// --- Slave passive sleep synchronization during initialization ---
+if (slave_ && is_initializing_ && !sleep_state_synced_) {
+    if (timer_kind == 3 && minutes > 0) {
+        ESP_LOGI(TAG, "Discovered active sleep timer (%u min) during init", minutes);
+        ignore_sleep_timer_callback_ = true;
+        sleep_timer_.publish_state(minutes);
+        ignore_sleep_timer_callback_ = false;
+    } else {
+        ESP_LOGI(TAG, "No active sleep timer during init");
+        ignore_sleep_timer_callback_ = true;
+        sleep_timer_.publish_state(0);
+        ignore_sleep_timer_callback_ = false;
+    }
+
+    sleep_state_synced_ = true;
+}
+
+if (slave_ && is_initializing_ && sleep_state_synced_) {
+    ESP_LOGI(TAG, "Slave initialization complete after sleep sync");
+    is_initializing_ = false;
+}
 
 // Cap maximum sleep timer
 minutes = std::min(minutes, uint16_t(420));
