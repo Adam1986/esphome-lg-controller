@@ -990,7 +990,7 @@ if (calc_checksum(buffer) != buffer[12]) {
     ESP_LOGW(TAG, "Invalid checksum received, count=%d", invalid_checksum_count_);
 
     if (invalid_checksum_count_ >= 10) { // reboot threshold
-        ESP_LOGE(TAG, "Too many invalid frames as slave — rebooting");
+        ESP_LOGE(TAG, "Too many invalid frames as slave, ESP32 rebooting");
         delay(100);
         esp_restart();
     }
