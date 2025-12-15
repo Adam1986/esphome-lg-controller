@@ -1210,20 +1210,34 @@ active_reservation_ = buffer[3] & 0x10;
 uint8_t timer_kind = (buffer[8] >> 3) & 0x07;
 uint16_t minutes = ((buffer[8] & 0x07) << 8) | buffer[9];
 
-// Only update sleep timer state if this is a sleep timer frame
+// Cap maximum sleep timer
+minutes = std::min(minutes, uint16_t(420));
+
+// Only update sleep timer if this is a sleep timer frame
 if (timer_kind == 3) {  // sleep timer
-    // Only publish if different from current state to reduce redundant writes
+    if (minutes == 0) {
+        // AC cleared sleep externally
+        sleep_timer_ = 0;
+        active_reservation_ = false;
+        sleep_timer_target_millis_.reset();
+    } else if (active_reservation_) {
+        // Only decrement/countdown if we own the reservation
+        sleep_timer_ = minutes;
+    }
+
     if (sleep_timer_.state != minutes) {
-        ignore_sleep_timer_callback_ = true;   // prevent feedback loop
+        ignore_sleep_timer_callback_ = true;
         sleep_timer_.publish_state(minutes);
         ignore_sleep_timer_callback_ = false;
     }
-} else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
+} 
+else if (sleep_timer_target_millis_.has_value() && !active_reservation_) {
     // Cancel sleep if AC cleared reservation
     if (sleep_timer_.state != 0) {
         ignore_sleep_timer_callback_ = true;
         sleep_timer_.publish_state(0);
         ignore_sleep_timer_callback_ = false;
+        sleep_timer_target_millis_.reset();
     }
 }
 
