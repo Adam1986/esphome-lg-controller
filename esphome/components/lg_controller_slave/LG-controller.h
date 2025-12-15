@@ -977,25 +977,24 @@ if (calc_checksum(buffer) != buffer[12]) {
 
     // --- Slave-only checksum recovery ---
     if (slave_) {
-        uint32_t now = millis();
+    uint32_t now = millis();
 
-        // reset counter if last invalid was > 5s ago
-        if (now - last_invalid_checksum_ms_ > 5000) {
-            invalid_checksum_count_ = 0;
-        }
-
-        last_invalid_checksum_ms_ = now;
-        invalid_checksum_count_++;
-
-        ESP_LOGW(TAG, "Invalid checksum received, count=%d", invalid_checksum_count_);
-
-        // reboot if threshold reached
-        if (invalid_checksum_count_ >= 10) {
-            ESP_LOGE(TAG, "Too many invalid frames as slave — rebooting");
-            delay(100);
-            esp_restart();
-        }
+    // Optional: reset counter only if a long gap without errors
+    if (now - last_invalid_checksum_ms_ > 20000) { // 20s instead of 5s
+        invalid_checksum_count_ = 0;
     }
+
+    last_invalid_checksum_ms_ = now;
+    invalid_checksum_count_++;
+
+    ESP_LOGW(TAG, "Invalid checksum received, count=%d", invalid_checksum_count_);
+
+    if (invalid_checksum_count_ >= 10) { // reboot threshold
+        ESP_LOGE(TAG, "Too many invalid frames as slave — rebooting");
+        delay(100);
+        esp_restart();
+    }
+}
 
     return;
 }
