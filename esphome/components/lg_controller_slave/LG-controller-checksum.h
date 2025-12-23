@@ -1203,9 +1203,6 @@ if (calc_checksum(buffer) != buffer[12]) {
 
         active_reservation_ = buffer[3] & 0x10;
 
-this->target_temperature = target;
-active_reservation_ = buffer[3] & 0x10;
-
 //Extract sleep timer info safely
 uint8_t timer_kind = (buffer[8] >> 3) & 0x07;
 uint16_t minutes = ((buffer[8] & 0x07) << 8) | buffer[9];
