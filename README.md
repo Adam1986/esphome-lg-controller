@@ -57,7 +57,15 @@ You need at least the following parts for each indoor unit:
 
 The `hardware-tiny/` PCB can be ordered from [JLCPCB](https://cart.jlcpcb.com/quote/) (see instructions [here](https://github.com/JanM321/esphome-lg-controller/issues/2#issuecomment-1801803656)).
 
-## "hardware-FeatherS3" (May 2025)
+## "hardware-FeatherS3" (May 2025 - updated July 2026)
+
+* rev.20250519 (May 2025)
+
+This revision has a known issue: a 22 uF capacitor is missing at the regulator output (see [this comment](https://github.com/JanM321/esphome-lg-controller/issues/156#issuecomment-4621919638) for details). It is fairly straightforward to rework the PCB to add a capacitor, see [this comment](https://github.com/JanM321/esphome-lg-controller/issues/156#issuecomment-5004138957) for an example.
+
+* rev.20270717 (July 2026)
+
+This is the current revision. Note that the pictures below are for the older revision.
 
 <img src="hardware-FeatherS3/pcb-with-FeatherS3.jpg" width="400px" alt="PCB with FeatherS3">
 <img src="hardware-FeatherS3/pcb-top-and-bottom.jpg" width="400px" alt="PCB top and bottom">
