@@ -2,7 +2,7 @@
 
 ## 2026-11-09 — V2.0.0 public fork integration
 
-- Merged the working internal `lg_controller_rev3` implementation into the original public ESPHome component path, `esphome/components/lg_controller/`.
+- Integrated the working V2.0.0 implementation directly into the original `esphome/components/lg_controller/` component.
 - Updated standard/floor-standing sample configurations and regression tests to reference the public `lg_controller` component name.
 - Confirmed 19 C++ regression programs, Python syntax and UI-guard tests pass following integration.
 - Successfully validated and compiled the standard Slave example under ESPHome **2026.10.2** in GitHub Codespaces (47.1% flash use).
@@ -17,4 +17,4 @@
 - Expose up to 480 minutes in the Home Assistant sleep input, with full-duration physical validation still pending.
 - Improve extended data/capability discovery, pipe-temperature policies, optional floor-standing control paths and related diagnostics.
 
-Earlier iterative V1.x/Rev3 research preceded this published snapshot. The archive `ORIGINAL_BASELINE_NOTES.md` preserves the supplied package's earlier description, including its pre-deployment candidate status.
+Earlier iterative V1.x/Rev3 research preceded this published snapshot. Earlier development records remain available through Git history.

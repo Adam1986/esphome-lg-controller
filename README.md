@@ -5,7 +5,7 @@ This fork incorporates an enhanced [`lg_controller`](esphome/components/lg_contr
 
 The component is based on the original work of [JanM321](https://github.com/JanM321/esphome-lg-controller) and builds upon enhancements explored in [balazsborbely's fork](https://github.com/balazsborbely/esphome-lg-controller). Development and protocol analysis were predominantly AI-assisted, with real hardware captures and testing provided by the maintainer of this fork.
 
-**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. The renamed `lg_controller` standard Slave example compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
+**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. Both the standard Slave and floor-standing examples compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
 
 Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 

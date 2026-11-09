@@ -1,6 +1,6 @@
 # LG Controller V2.0.0 — PREMTB100 Master / ESP32 Slave improvements
 
-> **Status: hardware-tested community fork.** The maintainer reports V2.0.0 installed and operating successfully across their LG installation on 9 November 2026. The standard Slave example using the public `lg_controller` component also compiled with ESPHome **2026.10.2**. Further feature-specific tests and wider compatibility checks remain ongoing. This is **not an official upstream release**.
+> **Status: hardware-tested community fork.** The maintainer reports V2.0.0 installed and operating successfully across their LG installation on 9 November 2026. Both example configurations using the public `lg_controller` component compiled with ESPHome **2026.10.2**. Further feature-specific tests and wider compatibility checks remain ongoing. This is **not an official upstream release**.
 
 ## Background and credits
 
@@ -41,7 +41,7 @@ esphome config esphome/lg-example-slave.yaml
 esphome compile esphome/lg-example-slave.yaml
 ```
 
-The standard example compiled successfully with ESPHome 2026.10.2 on 9 November 2026. Standalone tests are not a replacement for testing actual hardware. The floor-standing example and model-specific functions should be validated separately before general compatibility claims.
+Both standard and floor-standing examples compiled successfully with ESPHome 2026.10.2 on 9 November 2026. Standalone tests are not a replacement for testing actual hardware. Model-specific floor-standing functions still require additional hardware validation.
 
 Review example hardware settings before flashing: GPIOs, ESP32 chip revision, UART timing, indoor-unit capabilities and the HTTP `web_server` configuration may not suit all installations. Keep the physical wall controller as Master if relying on its built-in temperature sensor. **Never commit credentials, local secrets, personal logs or extracted controller firmware.**
 

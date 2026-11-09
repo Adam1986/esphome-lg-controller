@@ -1,6 +1,6 @@
 # Develop this V2 fork in GitHub Codespaces
 
-This repository is a **direct GitHub fork of JanM321/esphome-lg-controller**. The V2 implementation is integrated under the original public component name, `lg_controller`; it is **not** a second `lg_controller_rev3` component.
+This repository is a **direct GitHub fork of JanM321/esphome-lg-controller**. The V2 implementation is integrated under the original public component name, `lg_controller`; no separately named ESPHome component is required.
 
 1. Open your fork in GitHub and start a Codespace from `main`.
 2. Create a branch before making changes: `git switch -c feature/lg-controller-v2` (or a newer feature branch).
