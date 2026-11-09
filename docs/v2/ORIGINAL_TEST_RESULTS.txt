@@ -1,0 +1,12 @@
+LG Controller V2.0.0 Baseline Candidate — offline verification
+
+PASS: 19 standalone C++17 test programs with -Wall -Wextra -pedantic
+PASS: tests/test_v2_ui_guards.py (extracts actual LgSwitch/LgSelect implementations and compiles them with mock ESPHome Switch/Select APIs; rejected requests do not publish; indoor readback can still publish)
+PASS: Python syntax compilation for components/lg_controller_rev3/climate.py
+PASS: PyYAML parsing of both complete bases
+PASS: both bases use one shared lg_controller_rev3 component and include filter_time_remaining
+PASS: neither base contains slave_sleep_safe_discovery; schema defaults True and C++ defaults True
+PASS: standard floorstanding_features=false and reversed_airflow=false; Garden floorstanding_features=true and reversed_airflow=true
+PASS: guard for floorstanding active-reservation discovery present
+NOT RUN: Full ESPHome 2026.10.2 firmware compile (ESPHome package unavailable)
+NOT RUN: Physical trial of this V2.0.0 package (previous sleep-safe diagnostic packets have been validated on Porch and Downstairs Bedroom)

@@ -1,0 +1,26 @@
+# Public floor-standing example. Keep physically separate Master and ESP Slave.
+# The floor-standing features are hardware-dependent and experimental.
+substitutions:
+  deviceid: "lg-example-floor"
+  devicename: "LG Example Floor"
+  deviceid_id_safe: "lg_example_floor"
+  temperature_sensor_entity_id: "sensor.replace_with_your_temperature_sensor"
+  fahrenheit: "false"
+  is_slave_controller: "true"
+
+<<: !include base-lg-ac-floorstanding.yaml
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  level: INFO

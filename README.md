@@ -1,3 +1,17 @@
+<!-- LG_V2_UPDATE_START -->
+## PREMTB100 Master / ESP32 Slave improvements (V2.0.0)
+
+This fork incorporates an enhanced [`lg_controller`](esphome/components/lg_controller/) component with improvements to communication, Master/Slave synchronisation, command handling, sleep reservations, and diagnostics.
+
+The component is based on the original work of [JanM321](https://github.com/JanM321/esphome-lg-controller) and builds upon enhancements explored in [balazsborbely's fork](https://github.com/balazsborbely/esphome-lg-controller). Development and protocol analysis were predominantly AI-assisted, with real hardware captures and testing provided by the maintainer of this fork.
+
+**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. The renamed `lg_controller` standard Slave example compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
+
+Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
+
+---
+<!-- LG_V2_UPDATE_END -->
+
 # ESPHome LG AC Wired Controller
 Wired controller for LG Air Conditioners using an ESP32 microcontroller and [ESPHome](https://esphome.io/). It can be used to control an indoor unit from [Home Assistant](https://www.home-assistant.io/).
 

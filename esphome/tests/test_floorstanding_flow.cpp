@@ -1,0 +1,39 @@
+#include <cassert>
+#include <cstdint>
+#include "../components/lg_controller/floorstanding_flow.h"
+#include "../components/lg_controller/slave_pipe_temp_discovery.h"
+using namespace lg_floorstanding;
+using esphome::lg_controller::SlavePipeTempDiscovery;
+
+int main() {
+    assert(!readback_due(false,1,0,true,false,3000,2500)); // only Slave uses guarded 28
+    assert(!readback_due(true,0,0,true,false,3000,2500));
+    assert(!readback_due(true,1,0,false,false,3000,2500));
+    assert(!readback_due(true,1,0,true,false,1000,2500));
+    assert(readback_due(true,1,0,true,false,2500,2500));
+    assert(!readback_due(true,1,0,true,true,2500,2500));
+    assert(!readback_due(true,1,1,true,false,3000,2500));
+    assert(readback_due(true,2,1,true,false,3000,2500));
+    assert(!retry_due(0,false,false,65000,65000));
+    assert(!retry_due(1,false,false,10000,65000));
+    assert(!retry_due(1,true,false,66000,65000));
+    assert(!retry_due(1,false,true,66000,65000));
+    assert(retry_due(1,false,false,65000,65000));
+    assert(!retry_due(2,false,false,200000,65000)); // bounded writes
+    assert(frame_is_newer(10,9));
+    assert(!frame_is_newer(9,10));
+    assert(frame_is_newer(10,0xFFFFFFF0u)); // 32-bit millis rollover
+
+    // Readback must be built from genuine matching observed A8 + C8, not a
+    // fabricated Type-0 status or a stale/mismatched pair.
+    uint8_t master[13]={0xA8,0x90,0,0,0x40,0x01,0x56,0x16,0,0,0x04,0,0};
+    uint8_t indoor[13]={0xC8,0x90,0,0,0x40,0x01,0x56,0x16,0,0,0,0,0};
+    uint8_t out[13]={};
+    assert(SlavePipeTempDiscovery::make_request(out,master,indoor,1000,1000));
+    assert(out[0]==0x28 && out[8]==0x40 && (out[1]&1)==0);
+    indoor[6]=0x50; // conflicting setpoint: no readback
+    assert(!SlavePipeTempDiscovery::make_request(out,master,indoor,1000,1000));
+    indoor[6]=0x56;
+    assert(!SlavePipeTempDiscovery::make_request(out,master,indoor,95000,1000));
+    return 0;
+}

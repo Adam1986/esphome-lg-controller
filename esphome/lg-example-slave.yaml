@@ -1,0 +1,26 @@
+# Public example only. Store Wi-Fi/API/OTA credentials in PRIVATE secrets.yaml.
+# Keep this file beside base-lg-ac-rev3.yaml, not inside examples/.
+substitutions:
+  deviceid: "lg-example-slave"
+  devicename: "LG Example Slave"
+  deviceid_id_safe: "lg_example_slave"
+  temperature_sensor_entity_id: "sensor.replace_with_your_temperature_sensor"
+  fahrenheit: "false"
+  is_slave_controller: "true"
+
+<<: !include base-lg-ac-rev3.yaml
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  level: INFO
