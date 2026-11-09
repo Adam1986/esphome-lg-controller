@@ -1,5 +1,5 @@
 # LG Controller V2.0.0 standard base — nine normal units, Master or Slave.
-# Use <<: !include base-lg-ac-rev3.yaml in each device YAML.
+# Use <<: !include base-lg-ac.yaml in each device YAML.
 # Uses the same enhanced source, with floor-standing features OFF.
 # No substitutions section: existing device substitutions remain in device YAML.
 

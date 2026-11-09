@@ -1,5 +1,5 @@
 # Public example only. Store Wi-Fi/API/OTA credentials in PRIVATE secrets.yaml.
-# Keep this file beside base-lg-ac-rev3.yaml, not inside examples/.
+# Keep this file beside base-lg-ac.yaml, not inside examples/.
 substitutions:
   deviceid: "lg-example-slave"
   devicename: "LG Example Slave"
@@ -8,7 +8,7 @@ substitutions:
   fahrenheit: "false"
   is_slave_controller: "true"
 
-<<: !include base-lg-ac-rev3.yaml
+<<: !include base-lg-ac.yaml
 
 wifi:
   ssid: !secret wifi_ssid

@@ -25,7 +25,7 @@ A valid transmit or UART echo should **not** be treated as proof that the indoor
 ## Repository layout
 
 - [`esphome/components/lg_controller/`](esphome/components/lg_controller/) — enhanced public ESPHome component (same name as original upstream).
-- [`esphome/base-lg-ac-rev3.yaml`](esphome/base-lg-ac-rev3.yaml) — shared standard-unit base; the filename retains an internal historical label, **not** a separate ESPHome component.
+- [`esphome/base-lg-ac.yaml`](esphome/base-lg-ac.yaml) — shared standard-unit base configuration.
 - [`esphome/base-lg-ac-floorstanding.yaml`](esphome/base-lg-ac-floorstanding.yaml) — optional floor-standing base.
 - [`esphome/lg-example-slave.yaml`](esphome/lg-example-slave.yaml) and [`esphome/lg-example-floorstanding.yaml`](esphome/lg-example-floorstanding.yaml) — sample configurations (require your own local secrets and sensor entities).
 - [`esphome/tests/`](esphome/tests/) and [`scripts/run-v2-offline-tests.sh`](scripts/run-v2-offline-tests.sh) — regression tests.
