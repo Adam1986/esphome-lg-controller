@@ -4,7 +4,7 @@
 
 - **Physical operation:** The maintainer reports that V2.0.0 was flashed to the installation's ESP32 controllers promptly after being built and ran successfully throughout the day. Actual on-device use included core power, target temperature, operating mode, and fan controls alongside physical PREMTB100 Masters. This is a user-reported deployment result, not independent certification of all features on all indoor models.
 - **Standalone regression tests:** 19/19 C++17 test programs passed with the enhanced V2 implementation integrated into `esphome/components/lg_controller`. Python syntax and the mocked UI-guard test passed.
-- **ESPHome configuration and compile:** `esphome config esphome/lg-example-slave.yaml` and `esphome compile esphome/lg-example-slave.yaml` passed using ESPHome **2026.10.2** in Codespaces. Flash usage was **864,960 / 1,835,008 bytes (47.1%)**. The build used locally generated test credentials and did not upload to any real device.
+- **ESPHome configuration and compile:** `esphome config esphome/lg-example-standard.yaml` and `esphome compile esphome/lg-example-standard.yaml` passed using ESPHome **2026.10.2** in Codespaces. Flash usage was **864,960 / 1,835,008 bytes (47.1%)**. The build used locally generated test credentials and did not upload to any real device.
 - **Floor-standing compilation:** Successfully compiled with ESPHome 2026.10.2. Flash usage was 866,368 / 1,835,008 bytes (47.2%).
 - **Component naming:** Active component is now `lg_controller`, matching the original upstream integration path. No separate development component directory is required.
 

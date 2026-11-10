@@ -27,7 +27,7 @@ A valid transmit or UART echo should **not** be treated as proof that the indoor
 - [`esphome/components/lg_controller/`](esphome/components/lg_controller/) — enhanced public ESPHome component (same name as original upstream).
 - [`esphome/base-lg-ac.yaml`](esphome/base-lg-ac.yaml) — shared standard-unit base configuration.
 - [`esphome/base-lg-ac-floorstanding.yaml`](esphome/base-lg-ac-floorstanding.yaml) — optional floor-standing base.
-- [`esphome/lg-example-slave.yaml`](esphome/lg-example-slave.yaml) and [`esphome/lg-example-floorstanding.yaml`](esphome/lg-example-floorstanding.yaml) — sample configurations (require your own local secrets and sensor entities).
+- [`esphome/lg-example-standard.yaml`](esphome/lg-example-standard.yaml) and [`esphome/lg-example-floorstanding.yaml`](esphome/lg-example-floorstanding.yaml) — sample configurations (require your own local secrets and sensor entities).
 - [`esphome/tests/`](esphome/tests/) and [`scripts/run-v2-offline-tests.sh`](scripts/run-v2-offline-tests.sh) — regression tests.
 - [`docs/v2/`](docs/v2/) — research and validation notes.
 
@@ -37,8 +37,8 @@ In a checkout of this repository, create **private** `esphome/secrets.yaml` valu
 
 ```bash
 bash scripts/run-v2-offline-tests.sh
-esphome config esphome/lg-example-slave.yaml
-esphome compile esphome/lg-example-slave.yaml
+esphome config esphome/lg-example-standard.yaml
+esphome compile esphome/lg-example-standard.yaml
 ```
 
 Both standard and floor-standing examples compiled successfully with ESPHome 2026.10.2 on 9 November 2026. Standalone tests are not a replacement for testing actual hardware. Model-specific floor-standing functions still require additional hardware validation.

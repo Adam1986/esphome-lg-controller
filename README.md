@@ -10,7 +10,63 @@ The component is based on the original work of [JanM321](https://github.com/JanM
 Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 
 ---
+### V2 configuration examples
+
+The enhanced `lg_controller` component supports both Master and Slave
+operation through the same component and shared configuration.
+
+| File | Purpose |
+|---|---|
+| [`base-lg-ac.yaml`](esphome/base-lg-ac.yaml) | Shared base for standard LG indoor units |
+| [`base-lg-ac-floorstanding.yaml`](esphome/base-lg-ac-floorstanding.yaml) | Shared base for floor-standing units |
+| [`lg-example-standard.yaml`](esphome/lg-example-standard.yaml) | Example standard device configuration |
+| [`lg-example-floorstanding.yaml`](esphome/lg-example-floorstanding.yaml) | Example floor-standing device configuration |
+
+For standard units, copy `lg-example-standard.yaml` to a device-specific
+filename and update its substitutions.
+
+Set `is_slave_controller: "true"` when retaining a physical LG wired
+controller as Master, or `"false"` when the ESP32 itself will act as
+Master. Do not configure two Master controllers on the same indoor unit.
+
+Keep the device YAML alongside its included base file and the local
+`components/` directory. Configure Wi-Fi, API and OTA credentials
+privately using `secrets.yaml`.
+
+Both example configurations have compiled successfully with
+ESPHome 2026.10.2.
+
+### Using the published GitHub component
+
+The supplied configurations use a local `components/` directory.
+Once V2 is published on the fork's `main` branch, you can instead
+load the component directly from GitHub by replacing the
+`external_components` section in your selected base YAML:
+
+```yaml
+external_components:
+  - source: github://Adam1986/esphome-lg-controller@main
+    components: [lg_controller]
+```
+
+This downloads the component source, not the shared base YAML files.
+Copy the appropriate base and device example into your ESPHome
+configuration directory separately.
+
+For reproducible installations, use a version tag rather than
+`main` once a tagged release is available.
+
 <!-- LG_V2_UPDATE_END -->
+
+---
+
+> **Original project documentation:** The following sections retain
+> JanM321's original hardware information, installation guidance and
+> technical explanations, with relevant V2 configuration details updated.
+> For the enhanced implementation, use the V2 configurations and guidance
+> above.
+
+
 
 # ESPHome LG AC Wired Controller
 Wired controller for LG Air Conditioners using an ESP32 microcontroller and [ESPHome](https://esphome.io/). It can be used to control an indoor unit from [Home Assistant](https://www.home-assistant.io/).
@@ -40,7 +96,7 @@ There seem to be two different protocols that LG AC units and wall controllers u
 1. **6-byte protocol**: the controller sends a 6-byte message every four seconds or so and the AC unit responds with a 6-byte message. This is the more basic protocol and likely older because it doesn't support advanced features and settings. An ESPHome implementation of this is available here: https://github.com/Flameeyes/esphome-lg-pqrcuds0
 2. **13-byte [protocol](protocol.md)**: the controller sends a 13-byte status message every 20 seconds (or when there's a change in settings) and the AC unit sends a very similar status message every 60 seconds. There are also other message types for more advanced settings. **This is the one implemented here.**
 
-The controller hardware is identical because both use a very slow serial connection (104 bps) over a three-wire cable (Red = 12V, Yellow = Signal, Black = GND). In fact, some LG controllers support both protocols: my LG PREMTB001 controller first tries the 13-byte protocol and if it doesn't receive a response it will switch to the 6-byte protocol. My LG PREMTB100 (newer controller) only supports the 13-byte protocol as far as I can tell.
+The controller hardware is identical because both use a very slow serial connection (100 bps in this V2 implementation; the original project documented 104 bps) over a three-wire cable (Red = 12V, Yellow = Signal, Black = GND). In fact, some LG controllers support both protocols: my LG PREMTB001 controller first tries the 13-byte protocol and if it doesn't receive a response it will switch to the 6-byte protocol. My LG PREMTB100 (newer controller) only supports the 13-byte protocol as far as I can tell.
 
 Wired controllers must be connected to the CN-REMO socket on the indoor unit's PCB (green 3 pin JST-XH connector). Fortunately my wall units came with a short extension cable already plugged into that port so I only had to open up the bottom part of the unit to connect my controller.
 
@@ -101,17 +157,17 @@ JLCPCB ordering instructions:
 
 I paid about $50 for five boards, fully assembled, before any shipping and import duties.
 
-*Note: if you use the FeatherS3 PCB, you'll also need to make some changes to `esphome/base.yaml` for ESPHome as part of the next step. See the FeatherS3 comments in that file.*
+*Note: if you use the FeatherS3 PCB, you'll also need to make some changes to `esphome/base-lg-ac.yaml` for ESPHome as part of the next step. See the FeatherS3 comments in that file.*
 
 # ESPHome Firmware
 I used the following steps to build the ESPHome firmware, flash it on the device, and add the controller in Home Assistant:
 1. Clone this repository and navigate to the `esphome` directory.
 2. Install ESPHome command line tools on Linux: https://esphome.io/guides/installing_esphome.html
-3. Ensure the Python virtual environment is activated (`source venv/bin/activate`).
-4. Copy `template.yaml` to (for example) `lg-livingroom.yaml` and edit the lines marked with `XXX`.
+3. If using a Python virtual environment, activate it (for example, `source .venv/bin/activate`). Otherwise, skip this step.
+4. Copy `lg-example-standard.yaml` to (for example) `lg-livingroom.yaml` and update its substitutions, including the device name, temperature sensor and Master/Slave setting.
 5. Connect the ESP32 DevKitC board to your computer with a micro USB cable. This is only needed the first time, after that it can use OTA updates over wifi.
 6. Run `esphome run lg-livingroom.yaml` to build the firmware and upload it to the device.
-7. The device can now be added in Home Assistant (Settings => Devices & Services). HA will ask you for the encryption key from the YAML file.
+7. The device can now be added in Home Assistant (Settings => Devices & Services). If prompted, provide the API encryption key configured in your private `secrets.yaml`.
 8. Disconnect the micro USB cable.
 9. Install the ESP32 DevKitC board on the PCB and connect the PCB to the AC.
 
@@ -130,7 +186,7 @@ Features currently available in Home Assistant:
 * Switch and binary sensor for Auto Dry (also known as Auto Clean) feature. Used to dry indoor unit when it's turned off after cooling/dehumidifying.
 * Sensors for reporting outdoor unit on/off, defrost, preheat, error code.
 * Sensors for reporting in/mid/out pipe temperatures (if supported by unit).
-* Input field for sleep timer from 0 to 420 minutes (0 turns off the sleep timer).
+* Input field for sleep reservations from 0 to 480 minutes (0 cancels the reservation; full 480-minute operation remains to be validated).
 * Input fields for fan speed installer setting (to fine-tune fan speeds, 0-255 with 0 being factory default). This is installer setting 3 (ESP Setting) on LG controllers.
 * Select option for over heating installer setting from 0-4 (to change over heating behavior in heating mode). This is installer setting 15 (Over Heating) on LG controllers.
 * YAML options for Fahrenheit mode and 'slave' controller mode.

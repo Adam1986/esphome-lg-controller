@@ -1,11 +1,12 @@
-# Public example only. Store Wi-Fi/API/OTA credentials in PRIVATE secrets.yaml.
+# Standard LG indoor-unit example, supporting Master or Slave. Store Wi-Fi/API/OTA credentials in PRIVATE secrets.yaml.
 # Keep this file beside base-lg-ac.yaml, not inside examples/.
 substitutions:
-  deviceid: "lg-example-slave"
-  devicename: "LG Example Slave"
-  deviceid_id_safe: "lg_example_slave"
+  deviceid: "lg-example-standard"
+  devicename: "LG Example Standard"
+  deviceid_id_safe: "lg_example_standard"
   temperature_sensor_entity_id: "sensor.replace_with_your_temperature_sensor"
   fahrenheit: "false"
+  # true = ESP32 Slave, false = ESP32 Master
   is_slave_controller: "true"
 
 <<: !include base-lg-ac.yaml

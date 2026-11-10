@@ -11,8 +11,8 @@ This repository is a **direct GitHub fork of JanM321/esphome-lg-controller**. Th
 
 ```bash
 bash scripts/run-v2-offline-tests.sh
-esphome config esphome/lg-example-slave.yaml
-esphome compile esphome/lg-example-slave.yaml
+esphome config esphome/lg-example-standard.yaml
+esphome compile esphome/lg-example-standard.yaml
 ```
 
 7. Optionally validate the floor-standing example with `esphome config esphome/lg-example-floorstanding.yaml` and `esphome compile esphome/lg-example-floorstanding.yaml`.
