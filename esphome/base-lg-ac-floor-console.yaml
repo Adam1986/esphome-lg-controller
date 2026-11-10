@@ -107,8 +107,11 @@ climate:
     floor_console_features: true
     # V2.0.2 EXPERIMENT: watch for unsolicited CD for 12s before the usual
     # full-settings readback. Helps coalesce rapid Top/Bottom/Both changes.
-    # This does NOT send an unverified selective Type-D request.
-    floor_console_passive_readback: true
+    # This experiment DOES send one unverified 2D.80 candidate after a real direction change.
+    # V2.0.2 passive CD observation made one-off changes slower in real tests.
+    floor_console_passive_readback: false
+    # UNVERIFIED Type-D 2D.80 probe; test only on the floor console.
+    floor_console_selective_cd_probe: true
     # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
     floor_console_reversed_airflow: true

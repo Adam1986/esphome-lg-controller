@@ -187,3 +187,11 @@ The complete revised source and a Git apply patch are supplied separately;
 this does not represent a merge into any remote GitHub repository. Offline
 C++ and Python regression tests passed; full ESPHome compile and physical
 readback of Top/Bottom/Both are still required.
+
+
+## V2.0.3: selective-CD on-wire experiment (not yet verified)
+
+For Garden Office only, see [Selective CD live probe](docs/v2/SELECTIVE_CD_LIVE_PROBE.md).
+This adds an **opt-in experimental Type-D `2D.80` candidate**, not an established LG read opcode.
+Do not enable on ordinary units or merge to stable until physical tests confirm it is safe.
+The previous V2.0.2 passive readback should be disabled for this trial.

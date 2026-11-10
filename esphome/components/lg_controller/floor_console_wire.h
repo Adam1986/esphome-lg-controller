@@ -20,6 +20,19 @@ inline bool recognized_frame(const uint8_t *f, Page page) {
            ((f[0] & 0xF8u) == 0xA8u || (f[0] & 0xF8u) == 0xC8u) &&
            (page != Page::Step || f[1] == 0x10) && checksum(f) == f[12];
 }
+// EXPERIMENTAL selective Type-D read candidate. It is NOT a proven LG read
+// opcode. Clone the just-transmitted 2D *write* so all 12 payload bytes,
+// including the requested discharge direction, are identical. If an indoor
+// unit treats 2D.80 as a write, it won't restore the previously observed
+// direction. Byte 1 bit 7 is speculative and may have other meanings.
+inline bool build_selective_cd_probe(uint8_t out[13], const uint8_t last_sent[13]) {
+    if (out == nullptr || last_sent == nullptr || last_sent[0] != 0x2Du ||
+        checksum(last_sent) != last_sent[12]) return false;
+    std::memcpy(out, last_sent, 13);
+    out[1] |= 0x80u;
+    out[12] = checksum(out);
+    return true;
+}
 inline uint8_t value(const uint8_t *f, Page page) {
     switch (page) {
       case Page::Comfort:   return (f[11] & 0x04u) != 0;

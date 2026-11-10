@@ -230,7 +230,8 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     bool floor_console_monitoring_ = false;
     bool floor_console_features_ = false;
     bool floor_console_reversed_airflow_ = false;
-    bool floor_console_passive_readback_ = false; // opt-in, experimental; no new UART opcodes
+    bool floor_console_passive_readback_ = false; // V2.0.2 passive experiment (disable for this test)
+    bool floor_console_selective_cd_probe_ = false; // opt-in, unverified Type-D 0x80 wire experiment
     sensor::Sensor *filter_time_remaining_ = nullptr;
     sensor::Sensor *filter_remaining_percent_ = nullptr;
     uint16_t filter_nominal_life_hours_ = 0;
@@ -273,6 +274,12 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
         uint32_t template_refresh_sent_at = 0;
         uint32_t template_wait_last_log_at = 0;
         bool template_refresh_echo_seen = false;
+        // One candidate per requested discharge write. Not a normal settings
+        // retry; a failed probe falls back to the proven full 28 readback.
+        uint8_t last_wire_write[MsgLen] = {};
+        bool selective_probe_attempted = false;
+        bool selective_probe_fallback_ready = false;
+        uint32_t selective_probe_sent_at = 0;
     } floor_console_tx_;
     struct FloorConsoleDeferredRequest {
         bool valid = false;
@@ -291,6 +298,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // arrives. Wait for readback before the second (and final) write.
     static constexpr uint32_t FLOOR_READBACK_SETTLE_MS = 2500u;
     static constexpr uint32_t FLOOR_PASSIVE_DISCHARGE_WINDOW_MS = 12000u;
+    static constexpr uint32_t FLOOR_SELECTIVE_CD_TIMEOUT_MS = 10000u;
     static constexpr uint32_t FLOOR_READBACK_TIMEOUT_MS = 60000u;
     static constexpr uint32_t FLOOR_READBACK_GUARD_WAIT_MS = 20000u;
     static constexpr uint32_t FLOOR_TX_REPEAT_MS = 65000u;
@@ -425,7 +433,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     uint32_t last_write_millis_ = 0;
     uint32_t last_line_busy_millis_ = 0;
 
-    enum class PendingSendKind : uint8_t { None, Status, TypeA, TypeB, TypeBPipePoll, TypeBDiscovery, TypeE, TypeAReadback, FloorConsole, FloorConsoleReadback, FloorConsoleTemplateRefresh };
+    enum class PendingSendKind : uint8_t { None, Status, TypeA, TypeB, TypeBPipePoll, TypeBDiscovery, TypeE, TypeAReadback, FloorConsole, FloorConsoleReadback, FloorConsoleTemplateRefresh, FloorConsoleSelectiveCDProbe };
     PendingSendKind pending_send_ = PendingSendKind::None;
 
     // Master-native Type-3 cancellation and indoor C8 confirmation.
@@ -811,6 +819,7 @@ public:
     }
     void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
     void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
+    void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
     void set_filter_remaining_percent_sensor(sensor::Sensor *s) { filter_remaining_percent_ = s; }
@@ -1309,6 +1318,11 @@ public:
                 case PendingSendKind::FloorConsoleTemplateRefresh:
                     ESP_LOGW(TAG, "FLOOR TEMPLATE: guarded 28 request had no UART echo; "
                                   "waiting for genuine AD/CD/CE.10 (no settings write)");
+                    break;
+                case PendingSendKind::FloorConsoleSelectiveCDProbe:
+                    ESP_LOGW(TAG, "FLOOR SELECTIVE: no UART echo for unverified 2D.80 candidate; "
+                                  "falling back to guarded 28 readback");
+                    floor_console_tx_.selective_probe_fallback_ready = true;
                     break;
                 case PendingSendKind::None:
                     ESP_LOGE(TAG, "unreachable");
@@ -2499,6 +2513,9 @@ private:
             if (pending_send_ == PendingSendKind::FloorConsoleReadback) {
                 ESP_LOGI(TAG, "FLOOR READBACK: 28 UART echo verified; awaiting genuine CD/CC/CE.10");
             }
+            if (pending_send_ == PendingSendKind::FloorConsoleSelectiveCDProbe) {
+                ESP_LOGI(TAG, "FLOOR SELECTIVE: 2D.80 UART echo verified, NOT proof of selective read or indoor acceptance; awaiting CD");
+            }
             if (pending_send_ == PendingSendKind::FloorConsoleTemplateRefresh) {
                 floor_console_tx_.template_refresh_echo_seen = true;
                 ESP_LOGI(TAG, "FLOOR TEMPLATE: guarded 28 UART echo verified; awaiting genuine page (not confirmation of control)");
@@ -3592,7 +3609,8 @@ private:
         floor_console_send_queued_ = false;
         floor_console_last_finish_at_ = millis();
         if (pending_send_ == PendingSendKind::FloorConsole ||
-            pending_send_ == PendingSendKind::FloorConsoleReadback)
+            pending_send_ == PendingSendKind::FloorConsoleReadback ||
+            pending_send_ == PendingSendKind::FloorConsoleSelectiveCDProbe)
             pending_send_ = PendingSendKind::None;
         if (superseded) {
             floor_console_report_("SUPERSEDED: newer HA selection waiting; stopped old retries");
@@ -3641,7 +3659,8 @@ private:
             if (tx.superseded) {
                 // Wait for an already transmitted frame's local UART echo.
                 if (pending_send_ != PendingSendKind::FloorConsole &&
-                    pending_send_ != PendingSendKind::FloorConsoleReadback)
+                    pending_send_ != PendingSendKind::FloorConsoleReadback &&
+                    pending_send_ != PendingSendKind::FloorConsoleSelectiveCDProbe)
                     floor_console_finish_("superseded", false);
             } else if (uint32_t(now - tx.requested_at) > FLOOR_TX_DEADLINE_MS) {
                 floor_console_finish_(tx.awaiting_template
@@ -3667,6 +3686,15 @@ private:
                              unsigned(FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS));
                 }
             } else if (tx.transmissions > 0 && tx.echo_seen) {
+                // The speculative Type-D probe gets only a short observation
+                // window, then we request the known safe full settings page.
+                if (tx.selective_probe_attempted &&
+                    !tx.selective_probe_fallback_ready &&
+                    uint32_t(now - tx.selective_probe_sent_at) >= FLOOR_SELECTIVE_CD_TIMEOUT_MS) {
+                    tx.selective_probe_fallback_ready = true;
+                    ESP_LOGW(TAG, "FLOOR SELECTIVE: no two matching indoor CD reports "
+                                  "within 10s of 2D.80 candidate; trying guarded 28 fallback");
+                }
                 // A guarded readback must not block the queue indefinitely
                 // if no safe synchronized Master/indoor Type-0 pair exists.
                 if (tx.readback_queued &&
@@ -3680,7 +3708,8 @@ private:
                 const uint32_t readback_settle = lg_floor_console::readback_settle_ms(
                     slave_, tx.page, floor_console_passive_readback_,
                     FLOOR_READBACK_SETTLE_MS, FLOOR_PASSIVE_DISCHARGE_WINDOW_MS);
-                if (lg_floor_console::readback_due(slave_, tx.transmissions,
+                if ((!tx.selective_probe_attempted || tx.selective_probe_fallback_ready) &&
+                    lg_floor_console::readback_due(slave_, tx.transmissions,
                     tx.readback_attempts, tx.echo_seen, tx.readback_queued,
                     uint32_t(now - tx.transmitted_at), readback_settle)) {
                     tx.readback_queued = true;
@@ -3759,6 +3788,30 @@ private:
         auto &tx = floor_console_tx_;
         if (!slave_ || !tx.active || tx.superseded || !tx.readback_queued) return;
         const uint32_t now = millis();
+        // Unverified Type-D page-5 selective read candidate. Only transmit
+        // when explicitly enabled, once for an actual HA discharge change,
+        // with a genuine checksum-valid 2D write already sent. Keep the
+        // setting identical to the write in case this is not a read opcode.
+        // Active sleep/reservations are excluded from this wire experiment.
+        if (floor_console_selective_cd_probe_ &&
+            tx.page == lg_floor_console::Page::Discharge &&
+            !tx.selective_probe_attempted &&
+            !active_reservation_ && !slave_sleep_master_active_ &&
+            !sleep_timer_target_millis_.has_value() &&
+            !floor_console_passive_readback_ &&
+            lg_floor_console::build_selective_cd_probe(send_buf_, tx.last_wire_write)) {
+            tx.readback_queued = false;
+            tx.selective_probe_attempted = true;
+            tx.selective_probe_sent_at = now;
+            ESP_LOGW(TAG, "FLOOR SELECTIVE EXPERIMENT: transmitting UNVERIFIED 2D.80 candidate "
+                          "for page 5; this MAY be interpreted as a settings write; "
+                          "no change to requested direction, one attempt only");
+            ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
+            UARTDevice::write_array(send_buf_, MsgLen);
+            last_write_millis_ = now;
+            pending_send_ = PendingSendKind::FloorConsoleSelectiveCDProbe;
+            return;
+        }
         if (!have_master_status_ || !have_unit_status_for_pipe_ ||
             !SlavePipeTempDiscovery::make_request(
                 send_buf_, last_master_status_, last_unit_status_for_pipe_,
@@ -3808,6 +3861,12 @@ private:
         tx.master_matches = 0;
         tx.indoor_matches = 0;
         tx.transmitted_at = now;
+        // Snapshot the precise last command BEFORE send_buf_ is reused by
+        // any subsequent status write or selective-readback request.
+        memcpy(tx.last_wire_write, send_buf_, MsgLen);
+        tx.selective_probe_attempted = false;
+        tx.selective_probe_fallback_ready = false;
+        tx.selective_probe_sent_at = 0;
         if (slave_ && floor_console_passive_readback_ && tx.page == lg_floor_console::Page::Discharge)
             ESP_LOGI(TAG, "FLOOR PASSIVE: observing for spontaneous genuine indoor CD "
                           "for up to %us before any full-refresh fallback; newer HA choices may supersede",
