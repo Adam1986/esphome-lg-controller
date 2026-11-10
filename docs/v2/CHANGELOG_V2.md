@@ -17,4 +17,4 @@
 - Expose up to 480 minutes in the Home Assistant sleep input, with full-duration physical validation still pending.
 - Improve extended data/capability discovery, pipe-temperature policies, optional floor console control paths and related diagnostics.
 
-Earlier iterative V1.x/Rev3 research preceded this published snapshot. Earlier development records remain available through Git history.
+V2.0.0 represents the consolidated result of earlier local development, protocol investigation and hardware testing. The repository contains the enhanced implementation, associated regression tests and documentation of the relevant findings. Earlier experimental builds and intermediate development versions are not included.

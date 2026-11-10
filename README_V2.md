@@ -51,7 +51,6 @@ Review example hardware settings before flashing: GPIOs, ESP32 chip revision, UA
 - [Sleep reservation improvements](docs/v2/SLEEP_RESERVATIONS.md)
 - [Testing and limitations](docs/v2/TESTING_AND_LIMITATIONS.md)
 - [Change history](docs/v2/CHANGELOG_V2.md)
-- [Codespaces development guide](docs/v2/CODESPACES_SETUP.md)
 
 ## Contributions
 

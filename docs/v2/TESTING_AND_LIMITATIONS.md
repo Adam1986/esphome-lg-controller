@@ -20,7 +20,7 @@
 
 ## Development history
 
-The V2.0.0 implementation underwent earlier internal development and testing before its successful hardware deployment and public ESPHome compilation. Previous development records remain available through Git history.
+V2.0.0 represents the consolidated result of earlier local development, protocol investigation and hardware testing. The repository contains the enhanced implementation, regression tests and relevant technical findings. Earlier experimental builds and intermediate versions are not included.
 
 ## Recommended before a public tagged release
 
