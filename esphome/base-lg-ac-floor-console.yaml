@@ -1,0 +1,328 @@
+# Floor Console configuration (e.g. LG ARNU07GQAA4).
+#
+# Uses the SAME lg_controller component as the standard units.
+#
+# Differences:
+# - Enables Comfort Cooling and Comfort Cooling Step controls.
+# - Enables discharge direction selection (Whole/Top/Bottom).
+# - Enables additional console-specific diagnostics.
+# - Reverses the Home Assistant vane option ordering to match
+#   the observed LG console mapping.
+#
+# floorstanding_reversed_airflow does NOT physically reverse
+# airflow. It translates between Home Assistant option indices
+# and the original LG protocol values.
+#
+# These options are model-dependent and may not be supported
+# by every LG console unit.
+#
+# LG Controller V2.0.0 floor console base — shared source.
+# Use <<: !include base-lg-ac-floor-console.yaml in the floor console device YAML.
+# No substitutions section: existing device substitutions remain in the device YAML.
+
+esphome:
+  name: ${deviceid}
+  friendly_name: ${devicename}
+
+esp32:
+  board: esp32dev
+  # For the FeatherS3, replace the board above with:
+  # board: um_feathers3
+  # variant: esp32s3
+  framework:
+    type: esp-idf
+    advanced:
+      minimum_chip_revision: "3.1"
+      sram1_as_iram: true
+      flash_chip: generic
+
+# esp32_ble_tracker:
+#   scan_parameters:
+#     active: false
+
+# bluetooth_proxy:
+#   active: false
+
+uart:
+  - id: ac_serial
+    tx_pin: GPIO25
+    rx_pin:
+      number: GPIO26
+      allow_other_uses: true
+    baud_rate: 100
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+sensor:
+  - platform: homeassistant
+    id: temp_sensor
+    internal: true
+    entity_id: ${temperature_sensor_entity_id}
+
+  - platform: uptime
+    type: timestamp
+    name: Last Boot
+
+  # Wi-Fi strength converted from dBm to 0-100%.
+  # Measured once every five minutes.
+  - platform: wifi_signal
+    name: "Wi-Fi Quality"
+    update_interval: 300s
+    unit_of_measurement: "%"
+    device_class: ""
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    filters:
+      - lambda: |-
+          if (x <= -100.0f) return 0.0f;
+          if (x >= -50.0f) return 100.0f;
+          return 2.0f * (x + 100.0f);
+
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      name: "Wi-Fi SSID"
+      entity_category: diagnostic
+
+# Single shared enhanced component for both kinds of LG unit.
+external_components:
+  - source: components
+    components: [lg_controller]
+
+climate:
+  - platform: lg_controller
+    name: ""
+    id: ${deviceid_id_safe}
+    target_temperature_step: 0.5
+    uart_id: ac_serial
+    rx_pin:
+      number: GPIO26
+      allow_other_uses: true
+    fahrenheit: ${fahrenheit}
+    is_slave_controller: ${is_slave_controller}
+    # Optional read-only diagnostics and experimental write-enabled controls.
+    floorstanding_monitoring: true
+    floorstanding_features: true
+    # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
+    # TX and RX both translate back to the original LG wire values.
+    floorstanding_reversed_airflow: true
+    temperature_sensor: temp_sensor
+
+    # Controls visible in Home Assistant.
+    floorstanding_comfort_control:
+      name: "Floor - Comfort Cooling"
+    floorstanding_direction_control:
+      name: "Floor - Discharge Direction"
+    floorstanding_step_control:
+      name: "Floor - Comfort Cooling Step"
+
+    # Keep the eight observation and status entities internal.
+    # They remain available to the firmware, with explicit FLOOR MONITOR/FLOOR TX
+    # logging in ESPHome, but won't appear in Home Assistant / Activity.
+    # The three actual controls remain exposed below via feature configuration.
+    floorstanding_command_status:
+      name: "Floor - Command Status"
+      internal: true
+    floorstanding_comfort_master:
+      name: "Floor - Comfort Cooling (Master)"
+      internal: true
+    floorstanding_comfort_indoor:
+      name: "Floor - Comfort Cooling (Indoor)"
+      internal: true
+    floorstanding_direction_master:
+      name: "Floor - Discharge Direction (Master)"
+      internal: true
+    floorstanding_direction_indoor:
+      name: "Floor - Discharge Direction (Indoor)"
+      internal: true
+    floorstanding_step_master:
+      name: "Floor - Comfort Cooling Step (Master)"
+      internal: true
+    floorstanding_step_indoor:
+      name: "Floor - Comfort Cooling Step (Indoor)"
+      internal: true
+    floorstanding_comfort_capability:
+      name: "Floor - Comfort Cooling Capability (C9)"
+      internal: true
+
+    vane1:
+      name: Airflow 1 Up-Down
+      id: vane_position_1
+      icon: mdi:arrow-up-down
+    vane2:
+      name: Airflow 2 Up-Down
+      id: vane_position_2
+      icon: mdi:arrow-up-down
+    vane3:
+      name: Airflow 3 Up-Down
+      id: vane_position_3
+      icon: mdi:arrow-up-down
+    vane4:
+      name: Airflow 4 Up-Down
+      id: vane_position_4
+      icon: mdi:arrow-up-down
+
+    overheating:
+      name: Over Heating
+      id: overheating
+      icon: mdi:heating-coil
+    overcooling:
+      name: Overcooling
+      id: overcooling
+      icon: mdi:snowflake-thermometer
+    cooling_thermal_off_fan:
+      name: Cooling Thermal Off Fan
+      id: cooling_thermal_off_fan
+    temperature_control_step:
+      name: Temperature Control Step
+      id: temperature_control_step
+    static_pressure_step:
+      name: Static Pressure Step
+      id: static_pressure_step
+    continuous_fan:
+      name: Continuous Fan
+      id: continuous_fan
+    temperature_based_fan_auto:
+      name: Temperature Based Fan Auto
+      id: temperature_based_fan_auto
+
+    # Read-only installer diagnostics: only exposed when operating as Slave.
+    # These declarations do not add entities on Master devices.
+    installer_overheating_status:
+      name: "Installer - Overheating"
+    installer_overcooling_status:
+      name: "Installer - Overcooling"
+    installer_cooling_thermal_off_fan_status:
+      name: "Installer - Cooling Thermal Off Fan"
+    installer_temperature_control_step_status:
+      name: "Installer - Temperature Control Step"
+    installer_continuous_fan_status:
+      name: "Installer - Continuous Fan"
+    installer_temperature_based_fan_auto_status:
+      name: "Installer - Temperature Based Fan Auto"
+    installer_fan_speed_slow_status:
+      name: "Installer - Fan Speed Slow (raw)"
+    installer_fan_speed_low_status:
+      name: "Installer - Fan Speed Low (raw)"
+    installer_fan_speed_medium_status:
+      name: "Installer - Fan Speed Medium (raw)"
+    installer_fan_speed_high_status:
+      name: "Installer - Fan Speed High (raw)"
+
+    fan_speed_slow:
+      name: Fan Speed Slow
+      id: fan_speed_slow
+      icon: mdi:fan-chevron-down
+      mode: box
+    fan_speed_low:
+      name: Fan Speed Low
+      id: fan_speed_low
+      icon: mdi:fan-speed-1
+      mode: box
+    fan_speed_medium:
+      name: Fan Speed Medium
+      id: fan_speed_medium
+      icon: mdi:fan-speed-2
+      mode: box
+    fan_speed_high:
+      name: Fan Speed High
+      id: fan_speed_high
+      icon: mdi:fan-speed-3
+      mode: box
+
+    sleep_timer:
+      name: "Sleep Timer (minutes)"
+      id: sleep_timer
+      icon: mdi:timer-outline
+      mode: box
+
+    error_code:
+      name: Error Code
+      id: error_code
+      icon: mdi:alert-circle-outline
+      accuracy_decimals: 0
+    pipe_temp_in:
+      name: Pipe Temperature In
+      id: pipe_temperature_in
+      icon: mdi:thermometer
+      unit_of_measurement: "°C"
+    pipe_temp_mid:
+      name: Pipe Temperature Mid
+      id: pipe_temperature_mid
+      icon: mdi:thermometer
+      unit_of_measurement: "°C"
+    pipe_temp_out:
+      name: Pipe Temperature Out
+      id: pipe_temperature_out
+      icon: mdi:thermometer
+      unit_of_measurement: "°C"
+    humidity:
+      name: Humidity
+      id: humidity
+    fan_operation_time:
+      name: Fan Operation Time
+      id: fan_operation_time
+    indoor_unit_operation_time:
+      name: Indoor Unit Operation Time
+      id: indoor_unit_operation_time
+    precise_room_temperature:
+      name: Precise Room Temperature
+      id: precise_room_temperature
+    # Verified indoor CC filter-hours telemetry. Unknown until the indoor
+    # unit has sent two consistent genuine CC frames; no extra UART polling.
+    filter_time_remaining:
+      name: "Filter Time Remaining"
+      icon: mdi:air-filter
+
+    # Optional ESTIMATED percentage, only if you know this model's rated
+    # filter lifetime. The PREMTB100 firmware has both 2400h and 960h cases.
+    # filter_nominal_life_hours: 2400
+    # filter_remaining_percent:
+    #   name: "Filter Remaining (estimated)"
+    #   icon: mdi:air-filter
+
+    power_consumption:
+      name: Power Consumption
+      id: power_consumption
+    current_power:
+      name: Current Power
+      id: current_power
+
+    defrost:
+      name: Defrost
+      id: defrost
+      icon: mdi:snowflake-melt
+    preheat:
+      name: Preheat
+      id: preheat
+      icon: mdi:heat-wave
+    outdoor:
+      name: Outdoor Unit
+      id: outdoor
+      icon: mdi:fan
+    auto_dry_active:
+      name: Auto Dry Active
+      id: auto_dry_active
+      icon: mdi:fan-clock
+    purifier:
+      name: Air Purifier
+      id: air_purifier
+      icon: mdi:pine-tree
+    internal_thermistor:
+      name: Internal Thermistor
+      id: internal_thermistor
+      icon: mdi:thermometer
+    auto_dry:
+      name: Auto Dry
+      id: auto_dry
+      icon: mdi:fan-clock
+
+button:
+  - platform: restart
+    name: "ESP32 Reboot"
+    entity_category: diagnostic
+
+web_server:
+  port: 80

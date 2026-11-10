@@ -1,0 +1,15 @@
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Local development environment
+.venv/
+**/.esphome/
+
+# Private ESPHome credentials
+**/secrets.yaml
+
+# Generated firmware files
+*.bin
+*.elf
