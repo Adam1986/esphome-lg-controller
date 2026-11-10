@@ -230,6 +230,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     bool floor_console_monitoring_ = false;
     bool floor_console_features_ = false;
     bool floor_console_reversed_airflow_ = false;
+    bool floor_console_passive_readback_ = false; // opt-in, experimental; no new UART opcodes
     sensor::Sensor *filter_time_remaining_ = nullptr;
     sensor::Sensor *filter_remaining_percent_ = nullptr;
     uint16_t filter_nominal_life_hours_ = 0;
@@ -289,6 +290,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // A genuine 28 settings refresh can take 20-60s before the indoor CD/CE.10
     // arrives. Wait for readback before the second (and final) write.
     static constexpr uint32_t FLOOR_READBACK_SETTLE_MS = 2500u;
+    static constexpr uint32_t FLOOR_PASSIVE_DISCHARGE_WINDOW_MS = 12000u;
     static constexpr uint32_t FLOOR_READBACK_TIMEOUT_MS = 60000u;
     static constexpr uint32_t FLOOR_READBACK_GUARD_WAIT_MS = 20000u;
     static constexpr uint32_t FLOOR_TX_REPEAT_MS = 65000u;
@@ -808,6 +810,7 @@ public:
         if (value) floor_console_monitoring_ = true;
     }
     void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
+    void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
     void set_filter_remaining_percent_sensor(sensor::Sensor *s) { filter_remaining_percent_ = s; }
@@ -3674,11 +3677,19 @@ private:
                 }
                 // One guarded 28 request per write, rather than waiting for
                 // a CD report the unit does not broadcast spontaneously.
+                const uint32_t readback_settle = lg_floor_console::readback_settle_ms(
+                    slave_, tx.page, floor_console_passive_readback_,
+                    FLOOR_READBACK_SETTLE_MS, FLOOR_PASSIVE_DISCHARGE_WINDOW_MS);
                 if (lg_floor_console::readback_due(slave_, tx.transmissions,
                     tx.readback_attempts, tx.echo_seen, tx.readback_queued,
-                    uint32_t(now - tx.transmitted_at), FLOOR_READBACK_SETTLE_MS)) {
+                    uint32_t(now - tx.transmitted_at), readback_settle)) {
                     tx.readback_queued = true;
                     tx.readback_queued_at = now;
+                    if (floor_console_passive_readback_ &&
+                        tx.page == lg_floor_console::Page::Discharge)
+                        ESP_LOGI(TAG, "FLOOR PASSIVE: no spontaneous two-CD confirmation "
+                                      "within %us; queuing existing guarded 28 full-refresh fallback",
+                                 unsigned(FLOOR_PASSIVE_DISCHARGE_WINDOW_MS / 1000u));
                 }
                 // A full settings batch may take a minute. Only retry after
                 // allowing a complete readback, not automatically at 10 s.
@@ -3797,6 +3808,10 @@ private:
         tx.master_matches = 0;
         tx.indoor_matches = 0;
         tx.transmitted_at = now;
+        if (slave_ && floor_console_passive_readback_ && tx.page == lg_floor_console::Page::Discharge)
+            ESP_LOGI(TAG, "FLOOR PASSIVE: observing for spontaneous genuine indoor CD "
+                          "for up to %us before any full-refresh fallback; newer HA choices may supersede",
+                     unsigned(FLOOR_PASSIVE_DISCHARGE_WINDOW_MS / 1000u));
         ESP_LOGI(TAG, "FLOOR TX: page %u, value %u, attempt %u/2, %s; template=%s (%us old), acceptance unverified",
                  unsigned(tx.page), unsigned(tx.target), unsigned(tx.transmissions),
                  slave_ ? "Slave" : "Master", src == 0 ? "genuine Master" : "genuine indoor",

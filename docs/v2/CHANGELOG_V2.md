@@ -1,3 +1,13 @@
+## Unreleased — V2.0.2 Floor Console passive-first readback experiment
+
+- Optional `floor_console_passive_readback` (off by default; on in the floor
+  example) waits up to 12 seconds for spontaneous genuine indoor `CD` after
+  a `2D` discharge write, before the existing guarded `28` full refresh.
+- Allows rapid selections to supersede an unverified direction without
+  launching a full-settings burst immediately; full fallback remains.
+- No speculative `2D.80` selective request or relaxation of collision/acceptance guards.
+- Investigation: `docs/v2/SELECTIVE_PAGE5_INVESTIGATION.md`.
+
 # V2 change history
 
 ## Unreleased — Floor Console read-before-write recovery (V2.0.1 candidate)

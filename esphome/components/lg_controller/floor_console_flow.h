@@ -1,9 +1,19 @@
 #pragma once
 #include <cstdint>
+#include "floor_console_wire.h"
 
 // Pure scheduling predicates used by the experimental floor console
 // controller. They do not issue UART commands and can be tested independently.
 namespace lg_floor_console {
+// No speculative Type-D read opcode: give an optional passive observation
+// window ONLY to discharge-direction changes on Slave floor consoles.
+// The existing guarded full-settings read remains the bounded fallback.
+inline uint32_t readback_settle_ms(bool slave, Page page, bool passive_enabled,
+                                   uint32_t regular_ms, uint32_t passive_ms) {
+    return slave && passive_enabled && page == Page::Discharge
+        ? passive_ms : regular_ms;
+}
+
 inline bool readback_due(bool is_slave, uint8_t writes, uint8_t readbacks,
                          bool echo_seen, bool already_queued,
                          uint32_t elapsed_since_write, uint32_t settle_ms) {

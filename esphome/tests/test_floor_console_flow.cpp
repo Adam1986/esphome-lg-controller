@@ -6,6 +6,18 @@ using namespace lg_floor_console;
 using esphome::lg_controller::SlavePipeTempDiscovery;
 
 int main() {
+    // Opt-in passive CD window is limited to discharge and Slave mode.
+    assert(readback_settle_ms(true, Page::Discharge, true, 2500, 12000) == 12000);
+    assert(readback_settle_ms(true, Page::Discharge, false, 2500, 12000) == 2500);
+    assert(readback_settle_ms(false, Page::Discharge, true, 2500, 12000) == 2500);
+    assert(readback_settle_ms(true, Page::Comfort, true, 2500, 12000) == 2500);
+    assert(readback_settle_ms(true, Page::Step, true, 2500, 12000) == 2500);
+    // No full-settings refresh before the observation window closes.
+    assert(!readback_due(true, 1, 0, true, false, 11999, 12000));
+    assert(readback_due(true, 1, 0, true, false, 12000, 12000));
+    // An observed/confirmed CD completes a transaction outside this helper;
+    // a superseding HA request must cancel its queued readback in the host.
+
     assert(!readback_due(false,1,0,true,false,3000,2500)); // only Slave uses guarded 28
     assert(!readback_due(true,0,0,true,false,3000,2500));
     assert(!readback_due(true,1,0,false,false,3000,2500));

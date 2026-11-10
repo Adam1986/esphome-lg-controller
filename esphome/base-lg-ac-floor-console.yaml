@@ -105,6 +105,10 @@ climate:
     # Optional read-only diagnostics and experimental write-enabled controls.
     floor_console_monitoring: true
     floor_console_features: true
+    # V2.0.2 EXPERIMENT: watch for unsolicited CD for 12s before the usual
+    # full-settings readback. Helps coalesce rapid Top/Bottom/Both changes.
+    # This does NOT send an unverified selective Type-D request.
+    floor_console_passive_readback: true
     # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
     floor_console_reversed_airflow: true
