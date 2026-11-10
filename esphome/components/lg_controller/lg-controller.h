@@ -232,6 +232,16 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     bool floor_console_reversed_airflow_ = false;
     bool floor_console_passive_readback_ = false; // V2.0.2 passive experiment (disable for this test)
     bool floor_console_selective_cd_probe_ = false; // opt-in, unverified Type-D 0x80 wire experiment
+    // V2.0.4: optional fast discharge writes with one delayed, coalesced
+    // genuine CD verification. Local echo != acceptance; the UI is optimistic.
+    bool floor_console_fast_discharge_ = false;
+    bool floor_fast_verify_pending_ = false;
+    bool floor_fast_verify_sent_ = false;
+    bool floor_fast_verify_echo_seen_ = false;
+    uint8_t floor_fast_verify_target_ = 0;
+    lg_floor_console::FastCDVerifier floor_fast_cd_verifier_;
+    uint32_t floor_fast_verify_queued_at_ = 0;
+    uint32_t floor_fast_verify_sent_at_ = 0;
     sensor::Sensor *filter_time_remaining_ = nullptr;
     sensor::Sensor *filter_remaining_percent_ = nullptr;
     uint16_t filter_nominal_life_hours_ = 0;
@@ -299,6 +309,11 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     static constexpr uint32_t FLOOR_READBACK_SETTLE_MS = 2500u;
     static constexpr uint32_t FLOOR_PASSIVE_DISCHARGE_WINDOW_MS = 12000u;
     static constexpr uint32_t FLOOR_SELECTIVE_CD_TIMEOUT_MS = 10000u;
+    // Wait until the user has stopped choosing outlets before flooding the
+    // 100-baud bus with a full-settings readback. At most one query per burst.
+    static constexpr uint32_t FLOOR_FAST_QUIET_MS = 45000u;
+    static constexpr uint32_t FLOOR_FAST_VERIFY_TIMEOUT_MS = 90000u;
+    static constexpr uint32_t FLOOR_FAST_VERIFY_MAX_PENDING_MS = 180000u;
     static constexpr uint32_t FLOOR_READBACK_TIMEOUT_MS = 60000u;
     static constexpr uint32_t FLOOR_READBACK_GUARD_WAIT_MS = 20000u;
     static constexpr uint32_t FLOOR_TX_REPEAT_MS = 65000u;
@@ -819,6 +834,7 @@ public:
     }
     void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
     void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
+    void set_floor_console_fast_discharge(bool v) { floor_console_fast_discharge_ = v; }
     void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
@@ -1424,6 +1440,15 @@ public:
                 pending_type_b_timed_message_ = false;
             } else if (pending_type_e_settings_change_) {
                 send_type_e_settings_message();
+            } else if (floor_console_fast_discharge_ && lg_floor_console::fast_verify_due(
+                           floor_fast_verify_pending_, floor_fast_verify_sent_,
+                           floor_console_tx_.active, floor_console_deferred_.valid,
+                           uint32_t(millis_now - floor_fast_verify_queued_at_), FLOOR_FAST_QUIET_MS) &&
+                       !active_reservation_ && !slave_sleep_master_active_ &&
+                       !sleep_timer_target_millis_.has_value()) {
+                // Lowest-priority coalesced readback. Skip if we cannot build
+                // a known-safe Type-0 settings request from recent A8/C8.
+                send_floor_console_fast_verify_();
             } else if (pending_slave_pipe_discovery_) {
                 // Optional telemetry discovery always has lowest priority.
                 pending_slave_pipe_discovery_ = false;
@@ -2509,8 +2534,15 @@ private:
             if (pending_send_ == PendingSendKind::FloorConsole) {
                 floor_console_tx_.echo_seen = true;
                 ESP_LOGI(TAG, "FLOOR TX: UART echo verified; not an indoor acceptance");
+                if (floor_console_fast_discharge_ && slave_ && floor_console_tx_.active &&
+                    !floor_console_tx_.superseded &&
+                    floor_console_tx_.page == lg_floor_console::Page::Discharge) {
+                    floor_console_fast_complete_();
+                }
             }
             if (pending_send_ == PendingSendKind::FloorConsoleReadback) {
+                if (floor_fast_verify_pending_ && floor_fast_verify_sent_)
+                    floor_fast_verify_echo_seen_ = true;
                 ESP_LOGI(TAG, "FLOOR READBACK: 28 UART echo verified; awaiting genuine CD/CC/CE.10");
             }
             if (pending_send_ == PendingSendKind::FloorConsoleSelectiveCDProbe) {
@@ -3575,6 +3607,14 @@ private:
     }
 
     void floor_console_start_(lg_floor_console::Page page, uint8_t requested, uint32_t now) {
+        if (floor_console_fast_discharge_ && slave_ && page == lg_floor_console::Page::Discharge) {
+            // Last HA choice wins. Any prior delayed verification belongs to
+            // an older request and must never confirm this newer selection.
+            floor_fast_verify_pending_ = false;
+            floor_fast_verify_sent_ = false;
+            floor_fast_verify_echo_seen_ = false;
+            floor_fast_cd_verifier_.reset(requested);
+        }
         const unsigned p = floor_page_index_(page);
         const int src = floor_console_source_index_(page, now);
         if (src < 0 && !slave_) {
@@ -3625,6 +3665,43 @@ private:
         else floor_console_restore_observed_(page);
     }
 
+    // After a verified local echo, release the bus and let further discharge
+    // selections proceed without a 60-second settings burst. The visible
+    // select is explicitly optimistic until a genuine CD appears later.
+    void floor_console_fast_complete_() {
+        const auto target = floor_console_tx_.target;
+        floor_console_tx_ = FloorConsoleTransaction{};
+        floor_console_send_queued_ = false;
+        floor_console_last_finish_at_ = millis();
+        floor_fast_verify_pending_ = true;
+        floor_fast_verify_sent_ = false;
+        floor_fast_verify_echo_seen_ = false;
+        floor_fast_cd_verifier_.reset(target);
+        floor_fast_verify_target_ = target;
+        floor_fast_verify_queued_at_ = millis();
+        floor_fast_verify_sent_at_ = 0;
+        floor_console_publish_control_(lg_floor_console::Page::Discharge, target);
+        floor_console_report_("SENT (UNVERIFIED): discharge command echoed; one coalesced indoor CD readback will follow after 45s quiet");
+    }
+
+    void send_floor_console_fast_verify_() {
+        if (!slave_ || !floor_fast_verify_pending_ || floor_fast_verify_sent_ ||
+            !have_master_status_ || !have_unit_status_for_pipe_ ||
+            !SlavePipeTempDiscovery::make_request(
+                send_buf_, last_master_status_, last_unit_status_for_pipe_,
+                uint32_t(millis() - last_master_status_for_pipe_millis_),
+                uint32_t(millis() - last_unit_status_for_pipe_millis_))) return;
+        send_buf_[12] = calc_checksum(send_buf_);
+        floor_fast_verify_sent_ = true;
+        floor_fast_verify_echo_seen_ = false;
+        floor_fast_verify_sent_at_ = millis();
+        ESP_LOGI(TAG, "FLOOR FAST: one coalesced guarded 28 readback after 45s quiet; awaiting two indoor CD frames");
+        ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
+        UARTDevice::write_array(send_buf_, MsgLen);
+        last_write_millis_ = millis();
+        pending_send_ = PendingSendKind::FloorConsoleReadback;
+    }
+
     // Latest choice wins while an earlier 2D, 2C or 2E request is pending.
     // We never transmit two settings pages concurrently or unbounded retries.
     void floor_console_request_(lg_floor_console::Page page, uint8_t requested) {
@@ -3654,6 +3731,19 @@ private:
     }
 
     void floor_console_maintain_(uint32_t now) {
+        if (floor_fast_verify_pending_) {
+            const uint32_t elapsed = floor_fast_verify_sent_
+                ? uint32_t(now - floor_fast_verify_sent_at_)
+                : uint32_t(now - floor_fast_verify_queued_at_);
+            if ((floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_TIMEOUT_MS) ||
+                (!floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_MAX_PENDING_MS)) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("UNVERIFIED: no timely genuine indoor CD; optimistic discharge selection may be stale");
+                // Do not restore a potentially stale pre-command CD as the
+                // new physical state. Next genuine CD will resynchronise HA.
+            }
+        }
         if (floor_console_tx_.active) {
             auto &tx = floor_console_tx_;
             if (tx.superseded) {
@@ -3793,7 +3883,7 @@ private:
         // with a genuine checksum-valid 2D write already sent. Keep the
         // setting identical to the write in case this is not a read opcode.
         // Active sleep/reservations are excluded from this wire experiment.
-        if (floor_console_selective_cd_probe_ &&
+        if (floor_console_selective_cd_probe_ && !floor_console_fast_discharge_ &&
             tx.page == lg_floor_console::Page::Discharge &&
             !tx.selective_probe_attempted &&
             !active_reservation_ && !slave_sleep_master_active_ &&
@@ -3898,6 +3988,12 @@ private:
         floor_console_template_valid_[p][src] = true;
         // A new physical Master selection takes precedence over any deferred
         // HA command for that same page, not just over an active write.
+        if (sender == MessageSender::Master && master_had_selection && new_master_selection &&
+            page == lg_floor_console::Page::Discharge && floor_fast_verify_pending_) {
+            floor_fast_verify_pending_ = false;
+            floor_fast_verify_sent_ = false;
+            ESP_LOGI(TAG, "FLOOR FAST: physical wall-controller change supersedes unverified HA selection");
+        }
         if (sender == MessageSender::Master && new_master_selection &&
             floor_console_deferred_.valid && floor_console_deferred_.page == page) {
             floor_console_deferred_ = FloorConsoleDeferredRequest{};
@@ -3935,6 +4031,31 @@ private:
                 }
             }
             return;
+        }
+        // Deferred V2.0.4 verification uses the genuine indoor CD frames,
+        // never the local echo or the speculative Type-D 0x80 packet.
+        if (sender == MessageSender::Unit && page == lg_floor_console::Page::Discharge &&
+            floor_fast_verify_pending_) {
+            if (!floor_fast_verify_sent_ || !floor_fast_verify_echo_seen_) {
+                // The requested value remains visibly optimistic until we
+                // deliberately obtain a fresh status. A CD from a previous
+                // in-flight full-settings burst might be stale.
+                return;
+            }
+            const auto outcome = floor_fast_cd_verifier_.observe(observed);
+            if (outcome == lg_floor_console::FastCDResult::Confirmed) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("CONFIRMED: delayed genuine indoor CD matches requested discharge");
+            } else if (outcome == lg_floor_console::FastCDResult::Different) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("REJECTED/OVERRIDDEN: indoor CD differs from requested discharge; UI synchronised");
+            } else {
+                // Keep showing pending request until the second matching CD;
+                // do not momentarily publish a stale intermediate sample.
+                return;
+            }
         }
         // When idle, accept genuine indoor status or a changed value from the
         // wall Master. Repeated unchanged AD must not overwrite a confirmed

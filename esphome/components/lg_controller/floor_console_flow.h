@@ -36,4 +36,40 @@ inline bool template_refresh_due(uint8_t attempts, uint32_t elapsed_since_last,
 inline bool frame_is_newer(uint32_t first_at, uint32_t second_at) {
     return int32_t(first_at - second_at) >= 0; // rollover-safe for <2^31 ms
 }
+
+// V2.0.4: two genuinely matching CD reports are required to call an
+// optimistically displayed direction confirmed (or overridden).
+enum class FastCDResult : uint8_t { Waiting, Confirmed, Different };
+struct FastCDVerifier {
+    uint8_t target = 0;
+    uint8_t matching = 0;
+    uint8_t differing = 0;
+    uint8_t last_different = 0xFF;
+
+    void reset(uint8_t requested) {
+        target = requested;
+        matching = differing = 0;
+        last_different = 0xFF;
+    }
+    FastCDResult observe(uint8_t actual) {
+        if (actual == target) {
+            differing = 0;
+            last_different = 0xFF;
+            if (matching < 2) ++matching;
+            return matching >= 2 ? FastCDResult::Confirmed : FastCDResult::Waiting;
+        }
+        matching = 0;
+        if (last_different != actual) {
+            last_different = actual;
+            differing = 0;
+        }
+        if (differing < 2) ++differing;
+        return differing >= 2 ? FastCDResult::Different : FastCDResult::Waiting;
+    }
+};
+inline bool fast_verify_due(bool pending, bool sent, bool tx_active, bool deferred,
+                            uint32_t elapsed_quiet, uint32_t quiet_ms) {
+    return pending && !sent && !tx_active && !deferred && elapsed_quiet >= quiet_ms;
+}
+
 } // namespace lg_floor_console

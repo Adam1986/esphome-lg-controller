@@ -76,6 +76,7 @@ CONF_FLOOR_CONSOLE_FEATURES = "floor_console_features"
 CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW = "floor_console_reversed_airflow"
 CONF_FLOOR_CONSOLE_PASSIVE_READBACK = "floor_console_passive_readback"
 CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE = "floor_console_selective_cd_probe"
+CONF_FLOOR_CONSOLE_FAST_DISCHARGE = "floor_console_fast_discharge"
 # EXPERIMENTAL: actively read full diagnostics while genuine Master sleep is active.
 # Only affects Slave Type-B startup discovery; never touches normal climate/sleep writes.
 CONF_SLAVE_SLEEP_SAFE_DISCOVERY = "slave_sleep_safe_discovery"
@@ -275,6 +276,7 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
         # HIGHLY EXPERIMENTAL: send one 2D.80 candidate following a genuine
         # discharge write. Type-D selective reads are NOT documented/verified.
         cv.Optional(CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE, default=False): cv.boolean,
+        cv.Optional(CONF_FLOOR_CONSOLE_FAST_DISCHARGE, default=False): cv.boolean,
         # V2 default ON: proved functional in two active-reservation live tests.
         # Retain an optional per-device override; do not need this in either base.
         cv.Optional(CONF_SLAVE_SLEEP_SAFE_DISCOVERY, default=True): cv.boolean,
@@ -457,6 +459,7 @@ async def to_code(config):
     cg.add(var.set_floor_console_reversed_airflow(config[CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW]))
     cg.add(var.set_floor_console_passive_readback(config[CONF_FLOOR_CONSOLE_PASSIVE_READBACK]))
     cg.add(var.set_floor_console_selective_cd_probe(config[CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE]))
+    cg.add(var.set_floor_console_fast_discharge(config[CONF_FLOOR_CONSOLE_FAST_DISCHARGE]))
     cg.add(var.set_slave_sleep_safe_discovery(config[CONF_SLAVE_SLEEP_SAFE_DISCOVERY]))
     if CONF_FILTER_TIME_REMAINING in config:
         filt = await sensor.new_sensor(config[CONF_FILTER_TIME_REMAINING])
