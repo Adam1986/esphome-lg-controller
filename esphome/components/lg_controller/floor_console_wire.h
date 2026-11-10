@@ -7,7 +7,7 @@
 // genuine Master page; if none is available, a genuine indoor report of the
 // SAME page may supply the shared page payload. No zero-filled installer frames.
 // Only change the targeted field, source header, and checksum.
-namespace lg_floorstanding {
+namespace lg_floor_console {
 enum class Page : uint8_t { Comfort = 4, Discharge = 5, Step = 6 };
 
 inline uint8_t checksum(const uint8_t *bytes) {

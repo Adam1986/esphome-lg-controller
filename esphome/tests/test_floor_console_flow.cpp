@@ -1,8 +1,8 @@
 #include <cassert>
 #include <cstdint>
-#include "../components/lg_controller/floorstanding_flow.h"
+#include "../components/lg_controller/floor_console_flow.h"
 #include "../components/lg_controller/slave_pipe_temp_discovery.h"
-using namespace lg_floorstanding;
+using namespace lg_floor_console;
 using esphome::lg_controller::SlavePipeTempDiscovery;
 
 int main() {

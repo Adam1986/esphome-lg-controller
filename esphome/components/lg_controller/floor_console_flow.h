@@ -1,9 +1,9 @@
 #pragma once
 #include <cstdint>
 
-// Pure scheduling predicates used by the experimental floor-standing
+// Pure scheduling predicates used by the experimental floor console
 // controller. They do not issue UART commands and can be tested independently.
-namespace lg_floorstanding {
+namespace lg_floor_console {
 inline bool readback_due(bool is_slave, uint8_t writes, uint8_t readbacks,
                          bool echo_seen, bool already_queued,
                          uint32_t elapsed_since_write, uint32_t settle_ms) {
@@ -19,4 +19,4 @@ inline bool retry_due(uint8_t writes, bool readback_queued,
 inline bool frame_is_newer(uint32_t first_at, uint32_t second_at) {
     return int32_t(first_at - second_at) >= 0; // rollover-safe for <2^31 ms
 }
-} // namespace lg_floorstanding
+} // namespace lg_floor_console

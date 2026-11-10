@@ -1,5 +1,15 @@
 # V2 change history
 
+## Unreleased — Floor Console naming consistency
+
+- Rename internal Floor Console header files, C++ identifiers, and regression-test files
+  from `floorstanding` to `floor_console`, matching the existing public YAML filenames.
+- Use `floor_console_*` configuration keys in the standard and console bases.
+- Keep the previous `floorstanding_*` configuration keys as backward-compatible aliases,
+  with an explicit error if both names for one setting are supplied.
+- Preserve existing Home Assistant entity display names and LG bus message behaviour.
+- Offline regression checks pass; a full ESPHome compile of this refactor remains pending.
+
 ## 2026-11-09 — V2.0.0 public fork integration
 
 - Integrated the working V2.0.0 implementation directly into the original `esphome/components/lg_controller/` component.

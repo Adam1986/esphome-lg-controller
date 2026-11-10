@@ -8,6 +8,14 @@
 - **Floor Console compilation:** Successfully compiled with ESPHome 2026.10.2. Flash usage was 866,368 / 1,835,008 bytes (47.2%).
 - **Component naming:** Active component is now `lg_controller`, matching the original upstream integration path. No separate development component directory is required.
 
+## Pending Floor Console naming refactor
+
+A post-V2.0.0 naming-only refactor changes internal helpers and the canonical
+YAML keys to `floor_console_*`, retaining `floorstanding_*` as compatibility
+aliases. The 19 existing C++ regression programs and additional Python alias
+checks pass offline. A full ESPHome configuration validation and compilation
+of both examples in Codespaces is required before merging this change.
+
 ## Known limits and areas for additional testing
 
 - Both standard and floor console examples compile successfully. Model-specific floor console functionality still requires further hardware validation.

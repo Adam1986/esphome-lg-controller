@@ -9,7 +9,7 @@
 # - Reverses the Home Assistant vane option ordering to match
 #   the observed LG console mapping.
 #
-# floorstanding_reversed_airflow does NOT physically reverse
+# floor_console_reversed_airflow does NOT physically reverse
 # airflow. It translates between Home Assistant option indices
 # and the original LG protocol values.
 #
@@ -103,47 +103,47 @@ climate:
     fahrenheit: ${fahrenheit}
     is_slave_controller: ${is_slave_controller}
     # Optional read-only diagnostics and experimental write-enabled controls.
-    floorstanding_monitoring: true
-    floorstanding_features: true
+    floor_console_monitoring: true
+    floor_console_features: true
     # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
-    floorstanding_reversed_airflow: true
+    floor_console_reversed_airflow: true
     temperature_sensor: temp_sensor
 
     # Controls visible in Home Assistant.
-    floorstanding_comfort_control:
+    floor_console_comfort_control:
       name: "Floor - Comfort Cooling"
-    floorstanding_direction_control:
+    floor_console_direction_control:
       name: "Floor - Discharge Direction"
-    floorstanding_step_control:
+    floor_console_step_control:
       name: "Floor - Comfort Cooling Step"
 
     # Keep the eight observation and status entities internal.
     # They remain available to the firmware, with explicit FLOOR MONITOR/FLOOR TX
     # logging in ESPHome, but won't appear in Home Assistant / Activity.
     # The three actual controls remain exposed below via feature configuration.
-    floorstanding_command_status:
+    floor_console_command_status:
       name: "Floor - Command Status"
       internal: true
-    floorstanding_comfort_master:
+    floor_console_comfort_master:
       name: "Floor - Comfort Cooling (Master)"
       internal: true
-    floorstanding_comfort_indoor:
+    floor_console_comfort_indoor:
       name: "Floor - Comfort Cooling (Indoor)"
       internal: true
-    floorstanding_direction_master:
+    floor_console_direction_master:
       name: "Floor - Discharge Direction (Master)"
       internal: true
-    floorstanding_direction_indoor:
+    floor_console_direction_indoor:
       name: "Floor - Discharge Direction (Indoor)"
       internal: true
-    floorstanding_step_master:
+    floor_console_step_master:
       name: "Floor - Comfort Cooling Step (Master)"
       internal: true
-    floorstanding_step_indoor:
+    floor_console_step_indoor:
       name: "Floor - Comfort Cooling Step (Indoor)"
       internal: true
-    floorstanding_comfort_capability:
+    floor_console_comfort_capability:
       name: "Floor - Comfort Cooling Capability (C9)"
       internal: true
 

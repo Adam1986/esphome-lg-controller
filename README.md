@@ -78,7 +78,7 @@ and **discharge direction selection** (Whole/Top/Bottom).
 
 The console also uses a different ordering of airflow/vane
 positions. The enhanced component supports this through
-`floorstanding_reversed_airflow: true`, which translates
+`floor_console_reversed_airflow: true`, which translates
 Home Assistant's displayed options to the correct LG wire
 values in both directions.
 
@@ -87,6 +87,11 @@ the displayed and transmitted option mapping.
 
 The console base enables these extra controls and
 diagnostics. The standard base leaves them disabled.
+
+For consistency with LG's terminology, the C++ helper headers and YAML
+options use `floor_console_*`. Previous `floorstanding_*` YAML options remain
+available as backwards-compatible aliases; do not configure both spellings
+of the same option. Existing Home Assistant entity names are unchanged.
 
 **Both configurations use the same `lg_controller` component**
 and support Master or Slave operation. No separate firmware

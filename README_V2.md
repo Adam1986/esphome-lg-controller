@@ -148,3 +148,18 @@ and do not require additional LG protocol messages.
 The supplied configurations are validated with ESPHome 2026.10.2.
 Hardware-specific framework settings should be adapted when
 using different ESP32 boards.
+
+## Floor Console naming compatibility
+
+The implementation uses `floor_console_*` identifiers and helper headers
+(e.g. `floor_console_flow.h`, `floor_console_wire.h`, and
+`floor_console_decode.h`) to match LG's **Floor Console** terminology.
+
+New examples use `floor_console_*` YAML options. Configurations using the
+previous `floorstanding_*` options remain compatible: the component converts
+those legacy options to the new names during YAML validation. Do not supply
+both spellings for the same option. The existing Home Assistant entity display
+names are intentionally preserved, avoiding unplanned changes to entity IDs.
+
+This is a naming refactor; LG packet formats, control behaviour, and vane
+wire mappings have not been intentionally changed.

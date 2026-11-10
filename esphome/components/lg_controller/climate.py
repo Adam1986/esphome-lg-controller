@@ -71,27 +71,27 @@ CONF_TEMPERATURE_CONTROL_STEP = "temperature_control_step"
 CONF_STATIC_PRESSURE_STEP = "static_pressure_step"
 CONF_CONTINUOUS_FAN = "continuous_fan"
 CONF_TEMPERATURE_BASED_FAN_AUTO = "temperature_based_fan_auto"
-CONF_FLOORSTANDING_MONITORING = "floorstanding_monitoring"
-CONF_FLOORSTANDING_FEATURES = "floorstanding_features"
-CONF_FLOORSTANDING_REVERSED_AIRFLOW = "floorstanding_reversed_airflow"
+CONF_FLOOR_CONSOLE_MONITORING = "floor_console_monitoring"
+CONF_FLOOR_CONSOLE_FEATURES = "floor_console_features"
+CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW = "floor_console_reversed_airflow"
 # EXPERIMENTAL: actively read full diagnostics while genuine Master sleep is active.
 # Only affects Slave Type-B startup discovery; never touches normal climate/sleep writes.
 CONF_SLAVE_SLEEP_SAFE_DISCOVERY = "slave_sleep_safe_discovery"
 CONF_FILTER_TIME_REMAINING = "filter_time_remaining"
 CONF_FILTER_REMAINING_PERCENT = "filter_remaining_percent"
 CONF_FILTER_NOMINAL_LIFE_HOURS = "filter_nominal_life_hours"
-CONF_FLOORSTANDING_COMFORT_CONTROL = "floorstanding_comfort_control"
-CONF_FLOORSTANDING_DIRECTION_CONTROL = "floorstanding_direction_control"
-CONF_FLOORSTANDING_STEP_CONTROL = "floorstanding_step_control"
-CONF_FLOORSTANDING_COMMAND_STATUS = "floorstanding_command_status"
-FLOORSTANDING_OBSERVATIONS = {
-    "floorstanding_comfort_master": "Floor - Comfort Cooling (Master)",
-    "floorstanding_comfort_indoor": "Floor - Comfort Cooling (Indoor)",
-    "floorstanding_direction_master": "Floor - Discharge Direction (Master)",
-    "floorstanding_direction_indoor": "Floor - Discharge Direction (Indoor)",
-    "floorstanding_step_master": "Floor - Comfort Cooling Step (Master)",
-    "floorstanding_step_indoor": "Floor - Comfort Cooling Step (Indoor)",
-    "floorstanding_comfort_capability": "Floor - Comfort Cooling Capability (C9)",
+CONF_FLOOR_CONSOLE_COMFORT_CONTROL = "floor_console_comfort_control"
+CONF_FLOOR_CONSOLE_DIRECTION_CONTROL = "floor_console_direction_control"
+CONF_FLOOR_CONSOLE_STEP_CONTROL = "floor_console_step_control"
+CONF_FLOOR_CONSOLE_COMMAND_STATUS = "floor_console_command_status"
+FLOOR_CONSOLE_OBSERVATIONS = {
+    "floor_console_comfort_master": "Floor - Comfort Cooling (Master)",
+    "floor_console_comfort_indoor": "Floor - Comfort Cooling (Indoor)",
+    "floor_console_direction_master": "Floor - Discharge Direction (Master)",
+    "floor_console_direction_indoor": "Floor - Discharge Direction (Indoor)",
+    "floor_console_step_master": "Floor - Comfort Cooling Step (Master)",
+    "floor_console_step_indoor": "Floor - Comfort Cooling Step (Indoor)",
+    "floor_console_comfort_capability": "Floor - Comfort Cooling Capability (C9)",
 }
 CONF_ADVANCED_SETTINGS_RAW = "advanced_settings_raw"
 CONF_EXTENDED_SETTINGS_RAW = "extended_settings_raw"
@@ -135,11 +135,47 @@ CONF_INTERNAL_THERMISTOR = "internal_thermistor"
 CONF_AUTO_DRY = "auto_dry"
 
 VANE_OPTIONS = ["0 (Default)", "1 (Up)", "2", "3", "4", "5", "6 (Down)"]
-FLOORSTANDING_VANE_OPTIONS = ["6 (Up)", "5", "4", "3", "2", "1 (Down)", "0 (Default)"]
+FLOOR_CONSOLE_VANE_OPTIONS = ["6 (Up)", "5", "4", "3", "2", "1 (Down)", "0 (Default)"]
 OVERHEATING_OPTIONS = ["0 (Default)", "1 (+4C/+6C)", "2 (+2C/+4C)", "3 (-1C/+1C)", "4 (-0.5C/+0.5C)"]
 OVERCOOLING_OPTIONS = ["0 (Default: +0.5C/-0.5C)", "1 (+6C/+4C)", "2 (+4C/+2C)", "3 (+1C/-1C)"]
 TEMPERATURE_CONTROL_STEP_OPTIONS = ["0 (1C)", "1 (0.5C)"]
 COOLING_THERMAL_OFF_FAN_OPTIONS = ["0 (Fan Low)", "1 (Fan Off)", "2 (Fan Setting)"]
+
+# Prefer floor_console_* in new YAML. Accept older floorstanding_* keys so
+# existing installations can update the component without editing device YAML.
+# Resolve aliases BEFORE the main schema inserts optional default values.
+LEGACY_FLOOR_CONSOLE_KEYS = {
+    "floorstanding_comfort_capability": "floor_console_comfort_capability",
+    "floorstanding_comfort_control": "floor_console_comfort_control",
+    "floorstanding_comfort_indoor": "floor_console_comfort_indoor",
+    "floorstanding_comfort_master": "floor_console_comfort_master",
+    "floorstanding_command_status": "floor_console_command_status",
+    "floorstanding_direction_control": "floor_console_direction_control",
+    "floorstanding_direction_indoor": "floor_console_direction_indoor",
+    "floorstanding_direction_master": "floor_console_direction_master",
+    "floorstanding_features": "floor_console_features",
+    "floorstanding_monitoring": "floor_console_monitoring",
+    "floorstanding_reversed_airflow": "floor_console_reversed_airflow",
+    "floorstanding_step_control": "floor_console_step_control",
+    "floorstanding_step_indoor": "floor_console_step_indoor",
+    "floorstanding_step_master": "floor_console_step_master",
+}
+
+
+def _normalize_floor_console_keys(config):
+    if not isinstance(config, dict):
+        return config
+    normalized = dict(config)
+    for old_key, new_key in LEGACY_FLOOR_CONSOLE_KEYS.items():
+        if old_key not in normalized:
+            continue
+        if new_key in normalized:
+            raise cv.Invalid(
+                f"Use either '{new_key}' or its legacy alias '{old_key}', not both"
+            )
+        normalized[new_key] = normalized.pop(old_key)
+    return normalized
+
 
 CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
     {
@@ -227,11 +263,11 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
         # partly documented. Published only when they change.
         cv.Optional(CONF_ADVANCED_SETTINGS_RAW): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_EXTENDED_SETTINGS_RAW): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_FLOORSTANDING_MONITORING, default=False): cv.boolean,
-        cv.Optional(CONF_FLOORSTANDING_FEATURES, default=False): cv.boolean,
+        cv.Optional(CONF_FLOOR_CONSOLE_MONITORING, default=False): cv.boolean,
+        cv.Optional(CONF_FLOOR_CONSOLE_FEATURES, default=False): cv.boolean,
         # This only changes select labels and UI-index translation. Raw LG codes
         # on the bus and CA/AA/2A protocol handling remain unchanged.
-        cv.Optional(CONF_FLOORSTANDING_REVERSED_AIRFLOW, default=False): cv.boolean,
+        cv.Optional(CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW, default=False): cv.boolean,
         # V2 default ON: proved functional in two active-reservation live tests.
         # Retain an optional per-device override; do not need this in either base.
         cv.Optional(CONF_SLAVE_SLEEP_SAFE_DISCOVERY, default=True): cv.boolean,
@@ -253,17 +289,17 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
             state_class=STATE_CLASS_MEASUREMENT,
             entity_category="diagnostic",
         ),
-        cv.Optional(CONF_FLOORSTANDING_COMFORT_CONTROL,
+        cv.Optional(CONF_FLOOR_CONSOLE_COMFORT_CONTROL,
                     default={"name": "Floor - Comfort Cooling"}): switch.switch_schema(LgSwitch),
-        cv.Optional(CONF_FLOORSTANDING_DIRECTION_CONTROL,
+        cv.Optional(CONF_FLOOR_CONSOLE_DIRECTION_CONTROL,
                     default={"name": "Floor - Discharge Direction"}): select.select_schema(LgSelect),
-        cv.Optional(CONF_FLOORSTANDING_STEP_CONTROL,
+        cv.Optional(CONF_FLOOR_CONSOLE_STEP_CONTROL,
                     default={"name": "Floor - Comfort Cooling Step"}): select.select_schema(LgSelect),
-        cv.Optional(CONF_FLOORSTANDING_COMMAND_STATUS,
+        cv.Optional(CONF_FLOOR_CONSOLE_COMMAND_STATUS,
                     default={"name": "Floor - Command Status"}): text_sensor.text_sensor_schema(entity_category="diagnostic"),
         **{cv.Optional(key, default={"name": label}):
            text_sensor.text_sensor_schema(entity_category="diagnostic")
-           for key, label in FLOORSTANDING_OBSERVATIONS.items()},
+           for key, label in FLOOR_CONSOLE_OBSERVATIONS.items()},
 
         # Current installer values read from CA/CB/CE on the wired bus.
         # In Slave mode they are real HA sensors, never switches/selects/numbers.
@@ -288,6 +324,10 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
     }
 ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA)
 
+# Convert legacy names before the canonical schema validates and supplies defaults.
+CONFIG_SCHEMA = cv.All(_normalize_floor_console_keys, CONFIG_SCHEMA)
+
+
 async def to_code(config):
     rx_pin = await cg.gpio_pin_expression(config[CONF_RX_PIN])
 
@@ -303,7 +343,7 @@ async def to_code(config):
         config[CONF_OVERHEATING][CONF_INTERNAL] = True
         config[CONF_INTERNAL_THERMISTOR][CONF_INTERNAL] = True
 
-    vane_options = (FLOORSTANDING_VANE_OPTIONS if config[CONF_FLOORSTANDING_REVERSED_AIRFLOW]
+    vane_options = (FLOOR_CONSOLE_VANE_OPTIONS if config[CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW]
                     else VANE_OPTIONS)
     vane1 = await select.new_select(config[CONF_VANE1], options=vane_options)
     vane2 = await select.new_select(config[CONF_VANE2], options=vane_options)
@@ -403,11 +443,11 @@ async def to_code(config):
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])
             cg.add(getattr(var, f"set_{key}_text_sensor")(sens))
-    # Opt-in read-only floor-standing observations, on either Master or Slave.
+    # Opt-in read-only floor console observations, on either Master or Slave.
     # Master/indoor sources are distinct and are never inferred from local writes.
-    cg.add(var.set_floorstanding_monitoring(config[CONF_FLOORSTANDING_MONITORING]))
-    cg.add(var.set_floorstanding_features(config[CONF_FLOORSTANDING_FEATURES]))
-    cg.add(var.set_floorstanding_reversed_airflow(config[CONF_FLOORSTANDING_REVERSED_AIRFLOW]))
+    cg.add(var.set_floor_console_monitoring(config[CONF_FLOOR_CONSOLE_MONITORING]))
+    cg.add(var.set_floor_console_features(config[CONF_FLOOR_CONSOLE_FEATURES]))
+    cg.add(var.set_floor_console_reversed_airflow(config[CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW]))
     cg.add(var.set_slave_sleep_safe_discovery(config[CONF_SLAVE_SLEEP_SAFE_DISCOVERY]))
     if CONF_FILTER_TIME_REMAINING in config:
         filt = await sensor.new_sensor(config[CONF_FILTER_TIME_REMAINING])
@@ -418,17 +458,17 @@ async def to_code(config):
             raise cv.Invalid("filter_remaining_percent needs filter_nominal_life_hours > 0")
         filt_percent = await sensor.new_sensor(config[CONF_FILTER_REMAINING_PERCENT])
         cg.add(var.set_filter_remaining_percent_sensor(filt_percent))
-    if config[CONF_FLOORSTANDING_FEATURES]:
-        comfort = await switch.new_switch(config[CONF_FLOORSTANDING_COMFORT_CONTROL])
-        direction = await select.new_select(config[CONF_FLOORSTANDING_DIRECTION_CONTROL],
+    if config[CONF_FLOOR_CONSOLE_FEATURES]:
+        comfort = await switch.new_switch(config[CONF_FLOOR_CONSOLE_COMFORT_CONTROL])
+        direction = await select.new_select(config[CONF_FLOOR_CONSOLE_DIRECTION_CONTROL],
                                             options=["Both", "Top", "Bottom"])
-        step = await select.new_select(config[CONF_FLOORSTANDING_STEP_CONTROL],
+        step = await select.new_select(config[CONF_FLOOR_CONSOLE_STEP_CONTROL],
                                        options=["Step 1", "Step 2", "Step 3"])
-        cg.add(var.set_floorstanding_controls(comfort, direction, step))
-        status = await text_sensor.new_text_sensor(config[CONF_FLOORSTANDING_COMMAND_STATUS])
-        cg.add(var.set_floorstanding_command_status_text_sensor(status))
-    if config[CONF_FLOORSTANDING_MONITORING] or config[CONF_FLOORSTANDING_FEATURES]:
-        for key in FLOORSTANDING_OBSERVATIONS:
+        cg.add(var.set_floor_console_controls(comfort, direction, step))
+        status = await text_sensor.new_text_sensor(config[CONF_FLOOR_CONSOLE_COMMAND_STATUS])
+        cg.add(var.set_floor_console_command_status_text_sensor(status))
+    if config[CONF_FLOOR_CONSOLE_MONITORING] or config[CONF_FLOOR_CONSOLE_FEATURES]:
+        for key in FLOOR_CONSOLE_OBSERVATIONS:
             obs = await text_sensor.new_text_sensor(config[key])
             cg.add(getattr(var, f"set_{key}_text_sensor")(obs))
 
