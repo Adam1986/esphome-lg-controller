@@ -21,7 +21,7 @@ Observed in earlier on-device tests: a 420-minute reservation and Master reporti
 - Master-originated sleep timer changes while Home Assistant is online.
 - Explicit cancel to zero in Slave mode across multiple indoor models and operating states.
 - Behaviour around mode changes (for example COOL → HEAT), power state changes, reboot and reservation expiry.
-- Floor-standing active-sleep discovery and the full eight-hour countdown.
+- Floor Console active-sleep discovery and the full eight-hour countdown.
 
 ## Tests and precautions
 

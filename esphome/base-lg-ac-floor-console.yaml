@@ -1,5 +1,23 @@
-# LG Controller V2.0.0 floor-standing base — shared source.
-# Use <<: !include base-lg-ac-floorstanding.yaml in the floor-standing device YAML.
+# Floor Console configuration (e.g. LG ARNU07GQAA4).
+#
+# Uses the SAME lg_controller component as the standard units.
+#
+# Differences:
+# - Enables Comfort Cooling and Comfort Cooling Step controls.
+# - Enables discharge direction selection (Whole/Top/Bottom).
+# - Enables additional console-specific diagnostics.
+# - Reverses the Home Assistant vane option ordering to match
+#   the observed LG console mapping.
+#
+# floorstanding_reversed_airflow does NOT physically reverse
+# airflow. It translates between Home Assistant option indices
+# and the original LG protocol values.
+#
+# These options are model-dependent and may not be supported
+# by every LG console unit.
+#
+# LG Controller V2.0.0 floor console base — shared source.
+# Use <<: !include base-lg-ac-floor-console.yaml in the floor console device YAML.
 # No substitutions section: existing device substitutions remain in the device YAML.
 
 esphome:
@@ -87,7 +105,7 @@ climate:
     # Optional read-only diagnostics and experimental write-enabled controls.
     floorstanding_monitoring: true
     floorstanding_features: true
-    # This floor-standing installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
+    # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
     floorstanding_reversed_airflow: true
     temperature_sensor: temp_sensor

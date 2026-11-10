@@ -1,14 +1,14 @@
-# Public floor-standing example. Keep physically separate Master and ESP Slave.
-# The floor-standing features are hardware-dependent and experimental.
+# Public floor console example. Keep physically separate Master and ESP Slave.
+# The floor console features are hardware-dependent and experimental.
 substitutions:
-  deviceid: "lg-example-floor"
-  devicename: "LG Example Floor"
-  deviceid_id_safe: "lg_example_floor"
+  deviceid: "lg-example-floor-console"
+  devicename: "LG Example Floor Console"
+  deviceid_id_safe: "lg_example_floor_console"
   temperature_sensor_entity_id: "sensor.replace_with_your_temperature_sensor"
   fahrenheit: "false"
   is_slave_controller: "true"
 
-<<: !include base-lg-ac-floorstanding.yaml
+<<: !include base-lg-ac-floor-console.yaml
 
 wifi:
   ssid: !secret wifi_ssid

@@ -5,7 +5,7 @@
 - [x] Run 19 C++ regression tests and Python/UI guard tests.
 - [x] Compile the standard Slave example under ESPHome 2026.10.2.
 - [x] Document maintainer-reported successful physical deployment of V2.0.0.
-- [x] Compile the floor-standing example under ESPHome 2026.10.2. Model-specific functionality still requires validation.
+- [x] Compile the floor console example under ESPHome 2026.10.2. Model-specific functionality still requires validation.
 - [ ] Inspect `git status --short --untracked-files=all` and confirm `esphome/secrets.yaml` is ignored.
 - [ ] Inspect staged diff for personal settings, keys, firmware artefacts, log identifiers and proprietary LG firmware/source.
 - [ ] Verify no directly copied LG GPL source creates unmet licensing obligations; retain inherited notices and licence.

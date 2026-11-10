@@ -15,7 +15,7 @@ esphome config esphome/lg-example-standard.yaml
 esphome compile esphome/lg-example-standard.yaml
 ```
 
-7. Optionally validate the floor-standing example with `esphome config esphome/lg-example-floorstanding.yaml` and `esphome compile esphome/lg-example-floorstanding.yaml`.
+7. Optionally validate the floor console example with `esphome config esphome/lg-example-floor-console.yaml` and `esphome compile esphome/lg-example-floor-console.yaml`.
 8. Before staging changes, check `git status --short`, `git check-ignore -v esphome/secrets.yaml`, and `git diff`. Check for generated firmware, caches and private logs.
 9. Commit locally on the development branch, inspect the staged diff, then push when ready. Remember that **pushing to a public fork publishes that branch**, even if it has not been merged into `main`.
 

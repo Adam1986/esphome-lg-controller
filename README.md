@@ -5,7 +5,7 @@ This fork incorporates an enhanced [`lg_controller`](esphome/components/lg_contr
 
 The component is based on the original work of [JanM321](https://github.com/JanM321/esphome-lg-controller) and builds upon enhancements explored in [balazsborbely's fork](https://github.com/balazsborbely/esphome-lg-controller). Development and protocol analysis were predominantly AI-assisted, with real hardware captures and testing provided by the maintainer of this fork.
 
-**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. Both the standard Slave and floor-standing examples compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
+**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. Both the standard Slave and floor console examples compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
 
 Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 
@@ -18,9 +18,37 @@ operation through the same component and shared configuration.
 | File | Purpose |
 |---|---|
 | [`base-lg-ac.yaml`](esphome/base-lg-ac.yaml) | Shared base for standard LG indoor units |
-| [`base-lg-ac-floorstanding.yaml`](esphome/base-lg-ac-floorstanding.yaml) | Shared base for floor-standing units |
+| [`base-lg-ac-floor-console.yaml`](esphome/base-lg-ac-floor-console.yaml) | Shared base for floor console units |
 | [`lg-example-standard.yaml`](esphome/lg-example-standard.yaml) | Example standard device configuration |
-| [`lg-example-floorstanding.yaml`](esphome/lg-example-floorstanding.yaml) | Example floor-standing device configuration |
+| [`lg-example-floor-console.yaml`](esphome/lg-example-floor-console.yaml) | Example floor console device configuration |
+
+### Why a separate Floor Console configuration?
+
+The LG Floor Console (tested model: `ARNU07GQAA4`) supports
+additional functions compared with the standard wall-mounted
+and ducted units.
+
+These include **Comfort Cooling**, **Comfort Cooling Step**,
+and **discharge direction selection** (Whole/Top/Bottom).
+
+The console also uses a different ordering of airflow/vane
+positions. The enhanced component supports this through
+`floorstanding_reversed_airflow: true`, which translates
+Home Assistant's displayed options to the correct LG wire
+values in both directions.
+
+This does **not** reverse the physical airflow; it corrects
+the displayed and transmitted option mapping.
+
+The console base enables these extra controls and
+diagnostics. The standard base leaves them disabled.
+
+**Both configurations use the same `lg_controller` component**
+and support Master or Slave operation. No separate firmware
+implementation is required.
+
+Some console-specific functions remain experimental and
+may vary between LG models.
 
 For standard units, copy `lg-example-standard.yaml` to a device-specific
 filename and update its substitutions.
