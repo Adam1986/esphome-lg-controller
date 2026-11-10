@@ -20,6 +20,25 @@ Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMIT
 
 The V2 component has been exercised on real LG hardware, and the supplied standard and Floor Console example firmware builds and offline regression tests have passed. See the [testing details](docs/v2/TESTING_AND_LIMITATIONS.md) for limitations and model-specific caveats.
 
+### ESPHome framework and device diagnostics
+
+The V2 shared configurations also include ESP-IDF framework
+settings for compatible ESP32 hardware and additional
+Home Assistant diagnostic entities:
+
+- **ESP32 Reboot:** Restart the ESP32 from Home Assistant.
+- **Wi-Fi Quality:** Estimated signal strength as a percentage.
+- **Wi-Fi SSID:** Display the connected wireless network.
+- **Last Boot:** Timestamp of the ESP32's last restart.
+- **ESP-IDF optimisations:** Advanced chip revision, memory and
+  flash settings for compatible original ESP32 hardware.
+
+These are standard ESPHome features supplied through the V2
+YAML configurations, not changes to the LG protocol.
+
+See [ESPHome framework and diagnostics](README_V2.md#esphome-framework-and-device-diagnostics)
+for details and hardware compatibility considerations.
+
 ### V2 configuration examples
 
 The enhanced `lg_controller` component supports both Master and Slave

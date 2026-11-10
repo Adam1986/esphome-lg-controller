@@ -55,3 +55,96 @@ Review example hardware settings before flashing: GPIOs, ESP32 chip revision, UA
 ## Contributions
 
 Reports from other LG controller and indoor-unit combinations are welcome. When reporting results, please distinguish a successfully transmitted packet from genuine Master/indoor-unit confirmation, and include relevant configuration, anonymised logs and component version when possible.
+
+## ESPHome framework and device diagnostics
+
+In addition to the LG communication improvements, the V2.0.0
+shared YAML configurations incorporate several standard ESPHome
+features for hardware configuration, monitoring and management.
+
+These features are included in both the standard and Floor Console
+configurations, regardless of whether the ESP32 operates as Master
+or Slave.
+
+### ESP-IDF framework configuration
+
+The supplied configurations use the ESP-IDF framework:
+
+```yaml
+framework:
+  type: esp-idf
+  advanced:
+    minimum_chip_revision: "3.1"
+    sram1_as_iram: true
+    flash_chip: generic
+```
+
+- **ESP-IDF:** The framework used for the tested ESP32 builds.
+- **Minimum chip revision 3.1:** Targets compatible original ESP32
+  silicon revisions, rather than older revisions.
+- **SRAM1 as IRAM:** Makes additional memory available for
+  instruction storage on supported ESP32 hardware.
+- **Generic flash driver:** Selects the generic flash-chip
+  implementation.
+
+**Hardware compatibility:** These settings reflect the ESP32
+hardware used during development. They should not be assumed
+appropriate for older ESP32 revisions or other ESP32 families,
+including ESP32-S3. In particular, the SRAM1/IRAM option has
+bootloader requirements.
+
+Users adapting these examples should review the ESP32 board,
+variant and advanced framework settings before flashing.
+
+### ESP32 Reboot
+
+Both configurations expose an **ESP32 Reboot** button in
+Home Assistant under the diagnostic entities.
+
+It allows the ESP32 to be restarted remotely without physically
+disconnecting its power supply.
+
+This restarts the ESP32, not the LG indoor unit.
+
+### Wi-Fi Quality
+
+A diagnostic sensor reports an estimated Wi-Fi signal strength
+from 0% to 100%, calculated from the measured RSSI.
+
+The supplied configuration maps:
+
+- -100 dBm or weaker to 0%
+- -75 dBm to approximately 50%
+- -50 dBm or stronger to 100%
+
+The value is updated every five minutes.
+
+This is a convenient signal-strength indicator rather than
+a measurement of network throughput or connection reliability.
+
+### Wi-Fi SSID
+
+The **Wi-Fi SSID** diagnostic text sensor displays the name
+of the wireless network to which the ESP32 is connected.
+
+This can be useful when diagnosing connectivity or checking
+which network an individual controller is using.
+
+### Last Boot
+
+The **Last Boot** diagnostic uses ESPHome's uptime timestamp
+sensor to report the approximate time the ESP32 last started.
+
+This can help identify unexpected restarts during troubleshooting.
+
+### Master and Slave operation
+
+All these features operate independently of the LG controller's
+Master/Slave setting.
+
+They are implemented through standard ESPHome configuration
+and do not require additional LG protocol messages.
+
+The supplied configurations are validated with ESPHome 2026.10.2.
+Hardware-specific framework settings should be adapted when
+using different ESP32 boards.
