@@ -1,15 +1,25 @@
-<!-- LG_V2_UPDATE_START -->
-## PREMTB100 Master / ESP32 Slave improvements (V2.0.0)
+# ESPHome LG AC Wired Controller — V2.0.0
+
+## PREMTB100 Master / ESP32 Slave improvements
 
 This fork incorporates an enhanced [`lg_controller`](esphome/components/lg_controller/) component with improvements to communication, Master/Slave synchronisation, command handling, sleep reservations, and diagnostics.
 
 The component is based on the original work of [JanM321](https://github.com/JanM321/esphome-lg-controller) and builds upon enhancements explored in [balazsborbely's fork](https://github.com/balazsborbely/esphome-lg-controller). Development and protocol analysis were predominantly AI-assisted, with real hardware captures and testing provided by the maintainer of this fork.
 
-**Validation:** The maintainer reports V2.0.0 deployed successfully across their LG installation on 9 November 2026. Both the standard Slave and floor console examples compiled successfully with ESPHome **2026.10.2** on that date; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
+**Validation:** V2.0.0 was deployed successfully across the maintainer's LG installation on 9 November 2026. Both the standard Slave and Floor Console examples compiled successfully with ESPHome **2026.10.2** during 9–10 November 2026; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
 
 Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 
----
+### What V2.0.0 improves
+
+- **PREMTB100 Master / ESP32 Slave reliability:** better startup synchronisation, preservation of Master settings, command confirmation, retry handling and external-change arbitration.
+- **100-baud communication:** the supplied V2 configurations use 100 bps following LG driver-timing research and successful testing. This is a tested finding, **not a claim that every LG controller requires 100 baud**.
+- **LG-managed sleep reservations:** use the Master's reported remaining minutes to anchor and correct the Home Assistant countdown, verify set/cancel operations and avoid an independent ESP32-originated shutdown. The existing [upstream protocol documentation](protocol.md) had already described the transmitted countdown.
+- **Up to 480-minute reservation input:** supported by the V2 configuration; complete ESP32-initiated eight-hour operation is **not yet fully validated**.
+- **Additional diagnostics and model-specific controls:** improved discovery, readbacks and Floor Console options, with some advanced functions still under investigation.
+
+The V2 component has been exercised on real LG hardware, and the supplied standard and Floor Console example firmware builds and offline regression tests have passed. See the [testing details](docs/v2/TESTING_AND_LIMITATIONS.md) for limitations and model-specific caveats.
+
 ### V2 configuration examples
 
 The enhanced `lg_controller` component supports both Master and Slave
@@ -22,10 +32,26 @@ operation through the same component and shared configuration.
 | [`lg-example-standard.yaml`](esphome/lg-example-standard.yaml) | Example standard device configuration |
 | [`lg-example-floor-console.yaml`](esphome/lg-example-floor-console.yaml) | Example floor console device configuration |
 
+### Quick start — local component source
+
+For standard units, copy `lg-example-standard.yaml` to a device-specific
+filename and update its substitutions.
+
+Set `is_slave_controller: "true"` when retaining a physical LG wired
+controller as Master, or `"false"` when the ESP32 itself will act as
+Master. Do not configure two Master controllers on the same indoor unit.
+
+For the **local component source**, keep the device YAML beside its
+included base YAML and the `components/` directory. Configure Wi-Fi, API and OTA credentials
+privately using `secrets.yaml`.
+
+Both example configurations have compiled successfully with
+ESPHome 2026.10.2.
+
 ### Why a separate Floor Console configuration?
 
-The LG Floor Console (tested model: `ARNU07GQAA4`) supports
-additional functions compared with the standard wall-mounted
+The LG Floor Console configuration targets model `ARNU07GQAA4` and provides
+additional function controls beyond those typically used by the wall-mounted
 and ducted units.
 
 These include **Comfort Cooling**, **Comfort Cooling Step**,
@@ -50,20 +76,6 @@ implementation is required.
 Some console-specific functions remain experimental and
 may vary between LG models.
 
-For standard units, copy `lg-example-standard.yaml` to a device-specific
-filename and update its substitutions.
-
-Set `is_slave_controller: "true"` when retaining a physical LG wired
-controller as Master, or `"false"` when the ESP32 itself will act as
-Master. Do not configure two Master controllers on the same indoor unit.
-
-Keep the device YAML alongside its included base file and the local
-`components/` directory. Configure Wi-Fi, API and OTA credentials
-privately using `secrets.yaml`.
-
-Both example configurations have compiled successfully with
-ESPHome 2026.10.2.
-
 ### Using the published GitHub component
 
 The supplied configurations use a local `components/` directory.
@@ -77,26 +89,19 @@ external_components:
     components: [lg_controller]
 ```
 
-This downloads the component source, not the shared base YAML files.
+This downloads only the component source, not the shared base YAML files.
 Copy the appropriate base and device example into your ESPHome
-configuration directory separately.
+configuration directory separately. **Do not leave the local `source: components`
+entry active at the same time as the GitHub source.**
 
 For reproducible installations, use a version tag rather than
 `main` once a tagged release is available.
 
-<!-- LG_V2_UPDATE_END -->
-
 ---
 
-> **Original project documentation:** The following sections retain
-> JanM321's original hardware information, installation guidance and
-> technical explanations, with relevant V2 configuration details updated.
-> For the enhanced implementation, use the V2 configurations and guidance
-> above.
+## Original upstream documentation (JanM321)
 
-
-
-# ESPHome LG AC Wired Controller
+The following sections preserve JanM321's original hardware research and installation information, with a few V2-specific clarifications. Historical first-person descriptions (such as PCB development or personally tested units) refer to **the original author**, not the maintainer of this fork. For new installations, follow the **V2 configuration and quick-start instructions above**.
 Wired controller for LG Air Conditioners using an ESP32 microcontroller and [ESPHome](https://esphome.io/). It can be used to control an indoor unit from [Home Assistant](https://www.home-assistant.io/).
 
 This has some advantages compared to the [LG ThinQ integration](https://github.com/ollo69/ha-smartthinq-sensors):
@@ -108,18 +113,18 @@ This has some advantages compared to the [LG ThinQ integration](https://github.c
 
 <img src="images/controller4.png" width="660px" alt="Screenshot of Home Assistant dashboard">
 
-# Compatibility
-### Supported AC units
+### Compatibility
+#### Supported AC units
 If your indoor unit supports the LG PREMTB100 and/or LG PREMTA200 controller, it will very likely be compatible.
 
 The [wiki](https://github.com/JanM321/esphome-lg-controller/wiki) has a list of LG AC units that have been tested with this controller.
 
-### Multiple controllers
-It's possible to connect multiple controllers to a single indoor unit, but one of them must be set as 'master' and the others as 'slave'. Since February 2024, this ESPHome controller has experimental support for this. I'm not using this myself, so there might be some issues with this (please report them).
+#### Multiple controllers
+It's possible to connect multiple controllers to a single indoor unit, but one of them must be set as 'master' and the others as 'slave'. The original project introduced experimental multiple-controller support in February 2024. This fork extends and tests that arrangement with a physical PREMTB100 as Master and the ESP32 as Slave; results on other controller and indoor-unit combinations may differ.
 
 The room temperature sensor is ignored for 'slave' controllers, so if you want to use this controller with an LG controller and use a Home Assistant temperature sensor, the LG controller must be set as 'slave'.
 
-### Details
+#### Details
 There seem to be two different protocols that LG AC units and wall controllers use to communicate: 
 1. **6-byte protocol**: the controller sends a 6-byte message every four seconds or so and the AC unit responds with a 6-byte message. This is the more basic protocol and likely older because it doesn't support advanced features and settings. An ESPHome implementation of this is available here: https://github.com/Flameeyes/esphome-lg-pqrcuds0
 2. **13-byte [protocol](protocol.md)**: the controller sends a 13-byte status message every 20 seconds (or when there's a change in settings) and the AC unit sends a very similar status message every 60 seconds. There are also other message types for more advanced settings. **This is the one implemented here.**
@@ -132,10 +137,10 @@ Wired controllers using the new protocol only send and receive settings and curr
 
 See [protocol.md](protocol.md) for information about the protocol based on reverse engineering the PREMTB001 and PREMTB100 controllers.
 
-# Hardware
+### Hardware
 There are three different PCB designs. The "hardware-tiny" variant is most popular at this point. The "hardware-FeatherS3" PCB is a more recent addition.
 
-## "hardware" (original, June 2023)
+#### "hardware" (original, June 2023)
 <img src="images/controller2.jpg" width="255px" alt="PCB in enclosure">
 
 You need at least the following parts for each indoor unit:
@@ -145,7 +150,7 @@ You need at least the following parts for each indoor unit:
 
 The `hardware/` PCB I ordered from [PCBWay](https://www.pcbway.com/QuickOrderOnline.aspx).
 
-## "hardware-tiny" (November 2023)
+#### "hardware-tiny" (November 2023)
 <img src="hardware-tiny/pcb.jpg" width="400px" alt="Tiny PCB">
 
 You need at least the following parts for each indoor unit:
@@ -155,7 +160,7 @@ You need at least the following parts for each indoor unit:
 
 The `hardware-tiny/` PCB can be ordered from [JLCPCB](https://cart.jlcpcb.com/quote/) (see instructions [here](https://github.com/JanM321/esphome-lg-controller/issues/2#issuecomment-1801803656)).
 
-## "hardware-FeatherS3" (May 2025 - updated July 2026)
+#### "hardware-FeatherS3" (May 2025 - updated July 2026)
 
 * rev.20250519 (May 2025)
 
@@ -187,7 +192,7 @@ I paid about $50 for five boards, fully assembled, before any shipping and impor
 
 *Note: if you use the FeatherS3 PCB, you'll also need to make some changes to `esphome/base-lg-ac.yaml` for ESPHome as part of the next step. See the FeatherS3 comments in that file.*
 
-# ESPHome Firmware
+### ESPHome Firmware
 I used the following steps to build the ESPHome firmware, flash it on the device, and add the controller in Home Assistant:
 1. Clone this repository and navigate to the `esphome` directory.
 2. Install ESPHome command line tools on Linux: https://esphome.io/guides/installing_esphome.html
@@ -201,7 +206,7 @@ I used the following steps to build the ESPHome firmware, flash it on the device
 
 If you just want to connect to the device to view the debug logs, use `esphome logs lg-livingroom.yaml`.
 
-# Features
+### Features
 Features currently available in Home Assistant:
 * Operation mode (off, auto, cool, heat, dry/dehumidify, fan only).
 * Target temperature (0.5°C steps).
@@ -224,11 +229,11 @@ The LG ThinQ app and wireless remote can still be used to change these settings 
 
 Unfortunately not all settings are exposed to the wired controller, but if you're interested in a feature and it's supported by the PREMTB100 or PREMTA200 controller, please open an issue and we can consider adding it.
 
-# Tips
+### Tips
 * [Issue #43](https://github.com/JanM321/esphome-lg-controller/issues/43) has some information on temperature sensors that work well for this.
 * It's possible to use a Home Assistant template sensor as room temperature sensor. I'm [using this](https://gist.github.com/JanM321/b550285713f20231386509b2c227f0b8) to work around some issues with my LG Multi F unit in heating mode.
 
-# PCB (details)
+### PCB (details)
 ***❗ Update November 2023: This section is for my original PCB in the hardware/ directory. [Florian Brede](https://github.com/florianbrede-ayet) has designed a smaller and cheaper PCB that can be ordered from JLCPCB. It's in the [hardware-tiny/](hardware-tiny/) directory.***
 
 <img src="hardware/schematic.png" width="700px">
@@ -240,7 +245,7 @@ See [hardware/](hardware/) for schematic and list of materials. This part was ba
 The hardware needs four main components:
 1) **Microcontroller**. Similar to their setup, I used an Espressif ESP32-DevKitC-32E board (it has the ESP32-WROOM-32E module).
 A devkit module is nice for this because it doesn't need any external components. My PCB has two female pin headers connecting it to the board. This also makes it easy to replace or upgrade if needed.
-2) **Transceiver**. This is needed because the AC has a single (12V) signal wire but the microcontroller has separate (lower-voltage) RX/TX pins. I used a [TI TLIN1027DRQ1](https://www.ti.com/product/TLIN1027-Q1/part-details/TLIN1027DRQ1) LIN transceiver. LIN transceivers are typically used in the automotive industry but work well for this too. As [explained](https://flameeyes.blog/2021/06/29/lg-aircon-reversing-part-2-buses-and-cars/) by Flameeyes, it's important to use a LIN transceiver without the "TXD-Dominant Timeout" feature because LG's very slow ~104 bps serial connection can trigger that timeout and this will corrupt the signal.
+2) **Transceiver**. This is needed because the AC has a single (12V) signal wire but the microcontroller has separate (lower-voltage) RX/TX pins. I used a [TI TLIN1027DRQ1](https://www.ti.com/product/TLIN1027-Q1/part-details/TLIN1027DRQ1) LIN transceiver. LIN transceivers are typically used in the automotive industry but work well for this too. As [explained](https://flameeyes.blog/2021/06/29/lg-aircon-reversing-part-2-buses-and-cars/) by Flameeyes, it's important to use a LIN transceiver without the "TXD-Dominant Timeout" feature because LG's very slow serial connection (100 bps in the V2 configurations; historically described as approximately 104 bps) can trigger that timeout and this will corrupt the signal.
 3) **Voltage regulator**. This is needed because the AC supplies 12V but the microcontroller requires 3.3V. I replaced the voltage regulator part with a [Traco Power TSRN 1-2433](https://www.tracopower.com/int/model/tsrn-1-2433) step-down switching regulator because it doesn't require any external components such as capacitors or inductors. (In hindsight, the [Traco Power TSR 1-2433](https://www.tracopower.com/int/model/tsr-1-2433) might have been better because it's cheaper and has better availability.)
 4) **Connector**. To connect the PCB to the AC. I used a screw terminal for this.
 
@@ -250,6 +255,6 @@ Note: an alternative for the LIN transceiver is the opto-isolator design used he
 * https://github.com/AussieMakerGeek/LG_Aircon_MQTT_interface
 * https://www.instructables.com/Hacking-an-LG-Ducted-Split-for-Home-Automation/
 
-# License
+### License
 This project is licensed under the 0BSD License. See the LICENSE file for details.
 This basically means you can use it however you want. Attribution is not required but would be greatly appreciated.
