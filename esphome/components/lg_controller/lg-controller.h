@@ -1443,7 +1443,7 @@ public:
             } else if (floor_console_fast_discharge_ && lg_floor_console::fast_verify_due(
                            floor_fast_verify_pending_, floor_fast_verify_sent_,
                            floor_console_tx_.active, floor_console_deferred_.valid,
-                           uint32_t(millis_now - floor_fast_verify_queued_at_), FLOOR_FAST_QUIET_MS) &&
+                           lg_floor_console::fast_elapsed_ms(millis_now, floor_fast_verify_queued_at_), FLOOR_FAST_QUIET_MS) &&
                        !active_reservation_ && !slave_sleep_master_active_ &&
                        !sleep_timer_target_millis_.has_value()) {
                 // Lowest-priority coalesced readback. Skip if we cannot build
@@ -3733,8 +3733,8 @@ private:
     void floor_console_maintain_(uint32_t now) {
         if (floor_fast_verify_pending_) {
             const uint32_t elapsed = floor_fast_verify_sent_
-                ? uint32_t(now - floor_fast_verify_sent_at_)
-                : uint32_t(now - floor_fast_verify_queued_at_);
+                ? lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_sent_at_)
+                : lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_queued_at_);
             if ((floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_TIMEOUT_MS) ||
                 (!floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_MAX_PENDING_MS)) {
                 floor_fast_verify_pending_ = false;

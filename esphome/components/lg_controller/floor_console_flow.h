@@ -67,6 +67,15 @@ struct FastCDVerifier {
         return differing >= 2 ? FastCDResult::Different : FastCDResult::Waiting;
     }
 };
+// The loop snapshots its clock *before* handling UART RX. An echo handler may
+// start a verification timer slightly later in the same iteration; unsigned
+// subtraction would otherwise underflow and look ~49 days old.
+// Signed deltas still handle ordinary millis() rollover for sub-24-day timers.
+inline uint32_t fast_elapsed_ms(uint32_t now, uint32_t started_at) {
+    const int32_t elapsed = static_cast<int32_t>(now - started_at);
+    return elapsed < 0 ? 0u : static_cast<uint32_t>(elapsed);
+}
+
 inline bool fast_verify_due(bool pending, bool sent, bool tx_active, bool deferred,
                             uint32_t elapsed_quiet, uint32_t quiet_ms) {
     return pending && !sent && !tx_active && !deferred && elapsed_quiet >= quiet_ms;
