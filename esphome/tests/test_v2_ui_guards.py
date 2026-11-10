@@ -77,6 +77,31 @@ int main() {
     vane_ready = true;
     vane.apply_user_request("6 (Up)");
     assert(vane.state == "6 (Up)" && vane.publishes == 2);
+
+    // Floor Console write controls remain on last GENUINE observed state
+    // until the component explicitly publishes a confirmed readback.
+    LgSelect direction;
+    direction.publish_state("Both");
+    int requests = 0;
+    std::string last_request;
+    direction.set_request_handler([&](const std::string &v) {
+        ++requests;
+        last_request = v;
+    });
+    direction.apply_user_request("Bottom");
+    assert(requests == 1 && last_request == "Bottom");
+    assert(direction.state == "Both" && direction.publishes == 1);
+    direction.publish_state("Bottom");  // two matching indoor CD reports
+    assert(direction.state == "Bottom" && direction.publishes == 2);
+
+    LgSwitch comfort;
+    comfort.publish_state(false);
+    bool comfort_requested = false;
+    comfort.set_request_handler([&](bool v) { comfort_requested = v; });
+    comfort.apply_user_request(true);
+    assert(comfort_requested && !comfort.state && comfort.publishes == 1);
+    comfort.publish_state(true); // genuine indoor CC readback
+    assert(comfort.state && comfort.publishes == 2);
 }
 '''
 with tempfile.TemporaryDirectory() as td:

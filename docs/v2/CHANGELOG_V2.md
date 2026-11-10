@@ -1,5 +1,27 @@
 # V2 change history
 
+## Unreleased — Floor Console read-before-write recovery (V2.0.1 candidate)
+
+- Based directly on the `feature/floor-console-naming` source export. Preserve the
+  canonical `floor_console_*` naming and backward-compatible `floorstanding_*` aliases.
+- When a Floor Console command lacks a recent, genuine `AD`/`CD`/`CE.10`
+  template, queue a **guarded, read-only `28` full-settings request** before
+  trying any `2C`/`2D`/`2E` command. Use the existing matching A8+C8 rules
+  and retain the no-active-reservation policy for Floor Consoles.
+- Accept only a real, checksum-valid, age-checked page as the source of the
+  subsequent targeted command. Never fabricate page contents.
+- Limit template refresh to two queries and the existing transaction deadline;
+  report failure without a settings write if the page does not arrive.
+- Floor Console switch/select requests no longer optimistically publish their
+  state to Home Assistant: genuine observed readback owns the displayed state.
+  Latest-choice queue, physical Master precedence and two indoor confirmations
+  are retained.
+- Add regression coverage for query construction, timer/mismatched-status
+  guards, bounded refresh scheduling and non-optimistic UI controls.
+- **Validation outstanding:** full ESPHome compile of renamed component,
+  one physical Garden Office test and eventual GitHub branch merge.
+  See [merge instructions](MERGE_V2_0_1.md).
+
 ## Unreleased — Floor Console naming consistency
 
 - Rename internal Floor Console header files, C++ identifiers, and regression-test files

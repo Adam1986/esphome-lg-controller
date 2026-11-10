@@ -16,6 +16,13 @@ inline bool retry_due(uint8_t writes, bool readback_queued,
     return writes == 1 && !readback_queued && !write_queued &&
            elapsed_since_write >= min_wait_ms;
 }
+// Permit a single guarded read immediately, then at most one bounded retry.
+// No read request becomes a page write unless a genuine page is received.
+inline bool template_refresh_due(uint8_t attempts, uint32_t elapsed_since_last,
+                                 uint32_t retry_after_ms, uint8_t maximum_attempts) {
+    return attempts < maximum_attempts &&
+           (attempts == 0 || elapsed_since_last >= retry_after_ms);
+}
 inline bool frame_is_newer(uint32_t first_at, uint32_t second_at) {
     return int32_t(first_at - second_at) >= 0; // rollover-safe for <2^31 ms
 }

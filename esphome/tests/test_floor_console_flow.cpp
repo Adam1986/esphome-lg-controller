@@ -20,6 +20,10 @@ int main() {
     assert(!retry_due(1,false,true,66000,65000));
     assert(retry_due(1,false,false,65000,65000));
     assert(!retry_due(2,false,false,200000,65000)); // bounded writes
+    assert(template_refresh_due(0, 0, 75000, 2)); // first read, no template
+    assert(!template_refresh_due(1, 5000, 75000, 2)); // not a write/retry yet
+    assert(template_refresh_due(1, 75000, 75000, 2)); // one bounded retry
+    assert(!template_refresh_due(2, 100000, 75000, 2)); // no unbounded reads
     assert(frame_is_newer(10,9));
     assert(!frame_is_newer(9,10));
     assert(frame_is_newer(10,0xFFFFFFF0u)); // 32-bit millis rollover

@@ -163,3 +163,27 @@ names are intentionally preserved, avoiding unplanned changes to entity IDs.
 
 This is a naming refactor; LG packet formats, control behaviour, and vane
 wire mappings have not been intentionally changed.
+
+## V2.0.1 candidate — Floor Console template recovery
+
+The Floor Console Home Assistant controls now wait for genuine indoor
+confirmation rather than optimistically switching to the requested value.
+If a required `AD`/`CD`/`CE.10` settings template is missing or expired,
+the Slave first attempts a **read-only** `28` full-settings request built
+from a recent, consistent real Master/indoor `A8`+`C8` pair. Only after a
+fresh genuine page arrives does it queue the targeted `2C`/`2D`/`2E` write.
+If it cannot safely retrieve that page, it reports the failure in the ESPHome
+logs; it does not send a guessed write.
+
+This is deliberately guarded by the **existing no-active-reservation policy
+for Floor Consoles**, unlike the separate sleep-safe startup diagnostics
+validated on ordinary indoor units. The read-before-write is limited to at
+most two guarded reads, and the existing transaction deadline bounds the
+wait. Source template ages and normal climate, sleep, vane and installer
+control behaviour are otherwise unchanged.
+
+The patch was prepared against the `feature/floor-console-naming` source ZIP.
+The complete revised source and a Git apply patch are supplied separately;
+this does not represent a merge into any remote GitHub repository. Offline
+C++ and Python regression tests passed; full ESPHome compile and physical
+readback of Top/Bottom/Both are still required.

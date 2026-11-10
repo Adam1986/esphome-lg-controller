@@ -39,3 +39,25 @@ V2.0.0 represents the consolidated result of earlier local development, protocol
 - [ ] Verify the merged public-name component on hardware if switching from an already-working internal development build (source logic is intended to match, but the renamed binary is newly compiled).
 - [ ] Review credentials, secrets, log samples, original licences and attribution.
 - [ ] Distinguish advanced features still under investigation from fully confirmed operation.
+
+## V2.0.1 candidate Floor Console test plan
+
+- Start with Garden Office only. Confirm the reboot log identifies V2.0.1.
+- After reboot, before a `CD` has been received, request **Top** in HA.
+  HA must keep its previous confirmed value; log `FLOOR TEMPLATE:` should
+  show a guarded `28` read, followed by a genuine `CD` and then `FLOOR TX:
+  page 5` for the selected value.
+- Expect **two matching indoor `CD` reports** and `FLOOR TX: CONFIRMED`
+  before HA displays Top as confirmed. Verify the physical discharge outlet.
+- Repeat separately for **Both** and **Bottom**, allowing each transaction
+  to finish. Observe the floor console's physical behaviour and wall Master.
+- Test with no recent Master/indoor A8+C8 pair or active sleep. The guard
+  must defer and time out with **no `2D` settings write** rather than
+  transmitting fabricated fields. Floor Console sleep-active bootstrap is
+  intentionally not enabled.
+- Test a newer HA direction during an outstanding request: latest choice
+  wins; older unconfirmed selections must not appear as a confirmed state.
+
+The C++ tests cover pure frame/scheduling decisions, but cannot verify the
+firmware task loop or the indoor unit's physical acceptance. Build both
+example YAMLs with ESPHome 2026.10.2 and check actual on-device logs.
