@@ -31,3 +31,18 @@ The research also gave insight into 6- and 13-byte packet handling, checksum beh
 ## Research provenance
 
 Investigation combined existing project protocol documentation, publicly available LG low-level GPL-driver information, study of controller firmware, real serial logs and iterative AI-assisted coding/testing. **No extracted firmware binary or proprietary controller source is redistributed in this overlay.**
+
+## Existing sleep reservation protocol knowledge
+
+The original project's `protocol.md` already documents LG sleep
+reservation encoding, the regularly transmitted countdown and the
+wired controller's responsibility for reservation expiry.
+
+V2 builds upon that research rather than claiming these behaviours
+as new discoveries.
+
+The additional work focuses on synchronisation, acknowledgement,
+reservation decoding, cancellation, external-change handling and
+avoiding competing shutdown timers.
+
+See [Sleep reservation improvements](SLEEP_RESERVATIONS.md).
