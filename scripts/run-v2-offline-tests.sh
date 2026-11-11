@@ -12,6 +12,7 @@ for source in esphome/tests/*.cpp; do
 done
 echo "PASS: $passed C++ regression programs"
 python3 esphome/tests/test_v2_ui_guards.py
+python3 esphome/tests/test_floor_console_yaml_aliases.py
 python3 -m py_compile esphome/components/lg_controller/climate.py
 echo "PASS: Python syntax and mocked UI guard test"
 echo 'Note: does not replace full ESPHome compile or a physical device trial.'

@@ -16,5 +16,5 @@ int main() {
     assert(LgVaneMapping::option_to_wire(5, true) == 1); // '1 (Down)'
     assert(LgVaneMapping::option_to_wire(6, true) == 0); // '0 (Default)'
     assert(LgVaneMapping::option_to_wire(0, false) == 0); // standard
-    puts("PASS: floor-standing labels and raw vane roundtrip for all 4 vanes");
+    puts("PASS: floor console labels and raw vane roundtrip for all 4 vanes");
 }

@@ -2,8 +2,8 @@
 #include <initializer_list>
 #include <cstdint>
 #include <cstring>
-#include "../components/lg_controller/floorstanding_wire.h"
-using namespace lg_floorstanding;
+#include "../components/lg_controller/floor_console_wire.h"
+using namespace lg_floor_console;
 
 static void test(Page page, bool slave, uint8_t target, uint8_t src_value) {
     uint8_t source[13] = {0};

@@ -8,6 +8,8 @@ The component is based on the original work of [JanM321](https://github.com/JanM
 
 **Validation:** V2.0.0 was deployed successfully across the maintainer's LG installation on 9 November 2026. Both the standard Slave and Floor Console examples compiled successfully with ESPHome **2026.10.2** during 9–10 November 2026; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
 
+> **Floor Console compatibility notice — LG ARNU07GQAA4:** The additional Floor Console controls are **still undergoing on-device testing**. Early tests show that discharge-direction commands (Top / Bottom / Both) can be transmitted and subsequently confirmed by indoor-unit `CD` messages, but reliability, timing, and behaviour across operating conditions are not yet fully established. **Some functions may not work as expected** until further testing and confirmation. These experimental controls should not be treated as production-validated.
+
 Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 
 ### What V2.0.0 improves
@@ -78,7 +80,7 @@ and **discharge direction selection** (Whole/Top/Bottom).
 
 The console also uses a different ordering of airflow/vane
 positions. The enhanced component supports this through
-`floorstanding_reversed_airflow: true`, which translates
+`floor_console_reversed_airflow: true`, which translates
 Home Assistant's displayed options to the correct LG wire
 values in both directions.
 
@@ -88,12 +90,18 @@ the displayed and transmitted option mapping.
 The console base enables these extra controls and
 diagnostics. The standard base leaves them disabled.
 
+For consistency with LG's terminology, the C++ helper headers and YAML
+options use `floor_console_*`. Previous `floorstanding_*` YAML options remain
+available as backwards-compatible aliases; do not configure both spellings
+of the same option. Existing Home Assistant entity names are unchanged.
+
 **Both configurations use the same `lg_controller` component**
 and support Master or Slave operation. No separate firmware
 implementation is required.
 
-Some console-specific functions remain experimental and
-may vary between LG models.
+**ARNU07GQAA4 testing status:** Console-specific features — including Comfort Cooling, Comfort Cooling Step and Top/Bottom/Both discharge direction — are under active validation on the LG `ARNU07GQAA4`. Discharge-direction tests have demonstrated successful `2D` command transmission and later matching genuine indoor `CD` readback, but not full reliability across all modes, power states or rapid changes. The optional fast-discharge mode updates Home Assistant **optimistically on UART echo**, which is *not* proof the indoor unit accepted the change; a delayed `CD` check may confirm or correct that display. The experimental `2D.80` selective-request probe did **not** produce prompt readback in testing and should remain disabled. Expect possible delays or unexpected behaviour while validation continues.
+
+Other models have not been validated for these additional controls. If in doubt, leave Floor Console features disabled and use the genuine LG wall controller.
 
 ### Using the published GitHub component
 

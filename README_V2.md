@@ -20,6 +20,8 @@ Improve **ESP32 Slave** control while retaining physical LG **PREMTB100 Master**
 - **8-hour support:** many tested wall-controller models expose up to 480 minutes. V2's Home Assistant input supports 0–480 minutes, but the full 480-minute set/readback/expiry flow has not yet been proven end to end.
 - **Diagnostics/features:** extended discovery, pipe-temperature handling, installer-related diagnostics and floor console optional controls; actual support depends on indoor unit model.
 
+> **LG ARNU07GQAA4 Floor Console — experimental:** The additional Floor Console controls are still undergoing physical testing. The Top / Bottom / Both discharge-direction path has produced genuine indoor-unit confirmations in limited tests, but this does not establish reliable behaviour across all functions or conditions. Comfort Cooling, Comfort Cooling Step and other console-specific behaviour may not work as expected until further verification. Optional fast discharge displays the **requested** setting after a UART echo and verifies it later, so the selector can temporarily differ from the actual indoor-unit state. See [testing and limitations](docs/v2/TESTING_AND_LIMITATIONS.md).
+
 A valid transmit or UART echo should **not** be treated as proof that the indoor unit accepted a command. Readback from the physical controller and indoor unit remains important.
 
 ## Repository layout
@@ -148,3 +150,50 @@ and do not require additional LG protocol messages.
 The supplied configurations are validated with ESPHome 2026.10.2.
 Hardware-specific framework settings should be adapted when
 using different ESP32 boards.
+
+## Floor Console naming compatibility
+
+The implementation uses `floor_console_*` identifiers and helper headers
+(e.g. `floor_console_flow.h`, `floor_console_wire.h`, and
+`floor_console_decode.h`) to match LG's **Floor Console** terminology.
+
+New examples use `floor_console_*` YAML options. Configurations using the
+previous `floorstanding_*` options remain compatible: the component converts
+those legacy options to the new names during YAML validation. Do not supply
+both spellings for the same option. The existing Home Assistant entity display
+names are intentionally preserved, avoiding unplanned changes to entity IDs.
+
+This is a naming refactor; LG packet formats, control behaviour, and vane
+wire mappings have not been intentionally changed.
+
+## V2.0.1 candidate — Floor Console template recovery
+
+The Floor Console Home Assistant controls now wait for genuine indoor
+confirmation rather than optimistically switching to the requested value.
+If a required `AD`/`CD`/`CE.10` settings template is missing or expired,
+the Slave first attempts a **read-only** `28` full-settings request built
+from a recent, consistent real Master/indoor `A8`+`C8` pair. Only after a
+fresh genuine page arrives does it queue the targeted `2C`/`2D`/`2E` write.
+If it cannot safely retrieve that page, it reports the failure in the ESPHome
+logs; it does not send a guessed write.
+
+This is deliberately guarded by the **existing no-active-reservation policy
+for Floor Consoles**, unlike the separate sleep-safe startup diagnostics
+validated on ordinary indoor units. The read-before-write is limited to at
+most two guarded reads, and the existing transaction deadline bounds the
+wait. Source template ages and normal climate, sleep, vane and installer
+control behaviour are otherwise unchanged.
+
+The patch was prepared against the `feature/floor-console-naming` source ZIP.
+The complete revised source and a Git apply patch are supplied separately;
+this does not represent a merge into any remote GitHub repository. Offline
+C++ and Python regression tests passed; full ESPHome compile and physical
+readback of Top/Bottom/Both are still required.
+
+
+## V2.0.3: selective-CD on-wire experiment (not yet verified)
+
+For Garden Office only, see [Selective CD live probe](docs/v2/SELECTIVE_CD_LIVE_PROBE.md).
+This adds an **opt-in experimental Type-D `2D.80` candidate**, not an established LG read opcode.
+Do not enable on ordinary units or merge to stable until physical tests confirm it is safe.
+The previous V2.0.2 passive readback should be disabled for this trial.

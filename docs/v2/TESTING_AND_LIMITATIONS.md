@@ -8,6 +8,23 @@
 - **Floor Console compilation:** Successfully compiled with ESPHome 2026.10.2. Flash usage was 866,368 / 1,835,008 bytes (47.2%).
 - **Component naming:** Active component is now `lg_controller`, matching the original upstream integration path. No separate development component directory is required.
 
+## Pending Floor Console naming refactor
+
+A post-V2.0.0 naming-only refactor changes internal helpers and the canonical
+YAML keys to `floor_console_*`, retaining `floorstanding_*` as compatibility
+aliases. The 19 existing C++ regression programs and additional Python alias
+checks pass offline. A full ESPHome configuration validation and compilation
+of both examples in Codespaces is required before merging this change.
+
+## LG ARNU07GQAA4 Floor Console — testing in progress (11 November 2026)
+
+- **Status:** experimental; the Floor Console controls are **not yet fully validated** on model `ARNU07GQAA4`. Functions may behave unexpectedly, fail to apply, or take longer than ordinary fan-speed/temperature changes. Other LG Floor Console models are not validated by this result.
+- **Observed:** on-device trials in ESP32 Slave mode with a genuine LG wall Master have shown normal `2D` commands for Top / Both / Bottom and later matching genuine indoor `CD` reports for a discharge-direction selection. The latest fast-discharge test confirmed Bottom after a delayed full-settings readback. This does not prove the physical outlet responds instantly, or that every selection succeeds under all conditions.
+- **Fast-discharge option:** `floor_console_fast_discharge` is experimental and opt-in. After a UART echo, Home Assistant may show the **requested, unverified** direction; one later guarded `28` settings refresh checks for two consistent indoor `CD` reports. The command-status diagnostic distinguishes `SENT (UNVERIFIED)` from `CONFIRMED` and other outcomes.
+- **Unsuccessful earlier experiments:** spontaneous passive `CD` readback and the unverified `2D.80` selective-read candidate did not yield timely confirmations on the tested unit. Keep `floor_console_passive_readback: false` and `floor_console_selective_cd_probe: false`; the `2D.80` candidate is not proven read-only.
+- **Still to confirm:** repeated physical outlet response times, rapid successive selections, external changes from the wall controller, interactions with power/mode/fan, Comfort Cooling and Comfort Cooling Step, sleep reservation behaviour, startup recovery, and long-term stability.
+- **Use:** supervise initial testing; retain the genuine wall controller as Master and do not rely on unconfirmed console-specific behaviour for unattended operation.
+
 ## Known limits and areas for additional testing
 
 - Both standard and floor console examples compile successfully. Model-specific floor console functionality still requires further hardware validation.
@@ -31,3 +48,25 @@ V2.0.0 represents the consolidated result of earlier local development, protocol
 - [ ] Verify the merged public-name component on hardware if switching from an already-working internal development build (source logic is intended to match, but the renamed binary is newly compiled).
 - [ ] Review credentials, secrets, log samples, original licences and attribution.
 - [ ] Distinguish advanced features still under investigation from fully confirmed operation.
+
+## V2.0.1 candidate Floor Console test plan
+
+- Start with Garden Office only. Confirm the reboot log identifies V2.0.1.
+- After reboot, before a `CD` has been received, request **Top** in HA.
+  HA must keep its previous confirmed value; log `FLOOR TEMPLATE:` should
+  show a guarded `28` read, followed by a genuine `CD` and then `FLOOR TX:
+  page 5` for the selected value.
+- Expect **two matching indoor `CD` reports** and `FLOOR TX: CONFIRMED`
+  before HA displays Top as confirmed. Verify the physical discharge outlet.
+- Repeat separately for **Both** and **Bottom**, allowing each transaction
+  to finish. Observe the floor console's physical behaviour and wall Master.
+- Test with no recent Master/indoor A8+C8 pair or active sleep. The guard
+  must defer and time out with **no `2D` settings write** rather than
+  transmitting fabricated fields. Floor Console sleep-active bootstrap is
+  intentionally not enabled.
+- Test a newer HA direction during an outstanding request: latest choice
+  wins; older unconfirmed selections must not appear as a confirmed state.
+
+The C++ tests cover pure frame/scheduling decisions, but cannot verify the
+firmware task loop or the indoor unit's physical acceptance. Build both
+example YAMLs with ESPHome 2026.10.2 and check actual on-device logs.

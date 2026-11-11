@@ -1,11 +1,23 @@
 #include <cassert>
 #include <cstdint>
-#include "../components/lg_controller/floorstanding_flow.h"
+#include "../components/lg_controller/floor_console_flow.h"
 #include "../components/lg_controller/slave_pipe_temp_discovery.h"
-using namespace lg_floorstanding;
+using namespace lg_floor_console;
 using esphome::lg_controller::SlavePipeTempDiscovery;
 
 int main() {
+    // Opt-in passive CD window is limited to discharge and Slave mode.
+    assert(readback_settle_ms(true, Page::Discharge, true, 2500, 12000) == 12000);
+    assert(readback_settle_ms(true, Page::Discharge, false, 2500, 12000) == 2500);
+    assert(readback_settle_ms(false, Page::Discharge, true, 2500, 12000) == 2500);
+    assert(readback_settle_ms(true, Page::Comfort, true, 2500, 12000) == 2500);
+    assert(readback_settle_ms(true, Page::Step, true, 2500, 12000) == 2500);
+    // No full-settings refresh before the observation window closes.
+    assert(!readback_due(true, 1, 0, true, false, 11999, 12000));
+    assert(readback_due(true, 1, 0, true, false, 12000, 12000));
+    // An observed/confirmed CD completes a transaction outside this helper;
+    // a superseding HA request must cancel its queued readback in the host.
+
     assert(!readback_due(false,1,0,true,false,3000,2500)); // only Slave uses guarded 28
     assert(!readback_due(true,0,0,true,false,3000,2500));
     assert(!readback_due(true,1,0,false,false,3000,2500));
@@ -20,6 +32,10 @@ int main() {
     assert(!retry_due(1,false,true,66000,65000));
     assert(retry_due(1,false,false,65000,65000));
     assert(!retry_due(2,false,false,200000,65000)); // bounded writes
+    assert(template_refresh_due(0, 0, 75000, 2)); // first read, no template
+    assert(!template_refresh_due(1, 5000, 75000, 2)); // not a write/retry yet
+    assert(template_refresh_due(1, 75000, 75000, 2)); // one bounded retry
+    assert(!template_refresh_due(2, 100000, 75000, 2)); // no unbounded reads
     assert(frame_is_newer(10,9));
     assert(!frame_is_newer(9,10));
     assert(frame_is_newer(10,0xFFFFFFF0u)); // 32-bit millis rollover

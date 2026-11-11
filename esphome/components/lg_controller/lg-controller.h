@@ -11,11 +11,11 @@
 #include "lg_sleep_reservation.h"
 #include "lg_slave_sleep_sync.h"
 #include "lg_master_sleep.h"
-#include "floorstanding_decode.h"
-#include "floorstanding_wire.h"
+#include "floor_console_decode.h"
+#include "floor_console_wire.h"
 #include "lg_vane_mapping.h"
 #include "lg_filter_time.h"
-#include "floorstanding_flow.h"
+#include "floor_console_flow.h"
 
 #include "esphome.h"
 #ifdef USE_API
@@ -43,6 +43,9 @@ public:
     // Only optional controls with a protocol-specific preflight use this.
     // Reporting a genuine indoor state via publish_state() is not gated.
     void set_write_guard(std::function<bool(bool)> guard) { write_guard_ = guard; }
+    // For commands that need genuine LG readback, do not optimistically
+    // publish the requested state. Only publish_state() on observed confirmation.
+    void set_request_handler(std::function<void(bool)> handler) { request_handler_ = handler; }
 
     void restore_and_set_mode(switch_::SwitchRestoreMode mode) {
         set_restore_mode(mode);
@@ -54,27 +57,34 @@ public:
 protected:
     void write_state(bool value) override {
         if (write_guard_ && !write_guard_(value)) return;
+        if (request_handler_) { request_handler_(value); return; }
         publish_state(value);
     }
 
 private:
     std::function<bool(bool)> write_guard_;
+    std::function<void(bool)> request_handler_;
 };
 
 class LgSelect final : public select::Select {
 public:
     void set_control_guard(std::function<bool()> guard) { control_guard_ = guard; }
+    void set_request_handler(std::function<void(const std::string &)> handler) {
+        request_handler_ = handler;
+    }
 
 protected:
     void control(const std::string& value) override {
         if (this->current_option() != value) {
             if (control_guard_ && !control_guard_()) return;
+            if (request_handler_) { request_handler_(value); return; }
             this->publish_state(value);
         }
     }
 
 private:
     std::function<bool()> control_guard_;
+    std::function<void(const std::string &)> request_handler_;
 };
 
 class LgNumber final : public number::Number {
@@ -216,34 +226,46 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     esphome::text_sensor::TextSensor* advanced_settings_raw_ = nullptr;
     esphome::text_sensor::TextSensor* extended_settings_raw_ = nullptr;
 
-    // Optional floor-standing controls; distinct from read-only monitoring.
-    bool floorstanding_monitoring_ = false;
-    bool floorstanding_features_ = false;
-    bool floorstanding_reversed_airflow_ = false;
+    // Optional floor console controls; distinct from read-only monitoring.
+    bool floor_console_monitoring_ = false;
+    bool floor_console_features_ = false;
+    bool floor_console_reversed_airflow_ = false;
+    bool floor_console_passive_readback_ = false; // V2.0.2 passive experiment (disable for this test)
+    bool floor_console_selective_cd_probe_ = false; // opt-in, unverified Type-D 0x80 wire experiment
+    // V2.0.4: optional fast discharge writes with one delayed, coalesced
+    // genuine CD verification. Local echo != acceptance; the UI is optimistic.
+    bool floor_console_fast_discharge_ = false;
+    bool floor_fast_verify_pending_ = false;
+    bool floor_fast_verify_sent_ = false;
+    bool floor_fast_verify_echo_seen_ = false;
+    uint8_t floor_fast_verify_target_ = 0;
+    lg_floor_console::FastCDVerifier floor_fast_cd_verifier_;
+    uint32_t floor_fast_verify_queued_at_ = 0;
+    uint32_t floor_fast_verify_sent_at_ = 0;
     sensor::Sensor *filter_time_remaining_ = nullptr;
     sensor::Sensor *filter_remaining_percent_ = nullptr;
     uint16_t filter_nominal_life_hours_ = 0;
     LgFilterTimeRemaining filter_time_remaining_decoder_;
 
     uint8_t vane_option_to_wire_(size_t i) const {
-        return LgVaneMapping::option_to_wire(static_cast<uint8_t>(i), floorstanding_reversed_airflow_);
+        return LgVaneMapping::option_to_wire(static_cast<uint8_t>(i), floor_console_reversed_airflow_);
     }
     uint8_t vane_wire_to_option_(uint8_t raw) const {
-        return LgVaneMapping::wire_to_option(raw, floorstanding_reversed_airflow_);
+        return LgVaneMapping::wire_to_option(raw, floor_console_reversed_airflow_);
     }
-    LgSwitch *floorstanding_comfort_control_ = nullptr;
-    LgSelect *floorstanding_direction_control_ = nullptr;
-    LgSelect *floorstanding_step_control_ = nullptr;
-    text_sensor::TextSensor *floorstanding_command_status_ = nullptr;
+    LgSwitch *floor_console_comfort_control_ = nullptr;
+    LgSelect *floor_console_direction_control_ = nullptr;
+    LgSelect *floor_console_step_control_ = nullptr;
+    text_sensor::TextSensor *floor_console_command_status_ = nullptr;
 
     // Distinct source templates for pages 4/5 and page-6 subpage 0x10.
     // [page index 0..2][0: Master, 1: indoor], no speculative zero frames.
-    uint8_t floorstanding_templates_[3][2][MsgLen] = {};
-    uint32_t floorstanding_template_at_[3][2] = {};
-    bool floorstanding_template_valid_[3][2] = {};
-    struct FloorstandingTransaction {
+    uint8_t floor_console_templates_[3][2][MsgLen] = {};
+    uint32_t floor_console_template_at_[3][2] = {};
+    bool floor_console_template_valid_[3][2] = {};
+    struct FloorConsoleTransaction {
         bool active = false;
-        lg_floorstanding::Page page = lg_floorstanding::Page::Comfort;
+        lg_floor_console::Page page = lg_floor_console::Page::Comfort;
         uint8_t target = 0;
         uint8_t transmissions = 0;
         uint8_t master_matches = 0;
@@ -257,15 +279,26 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
         uint8_t readback_attempts = 0; // at most once for each 2D/2C/2E write
         uint32_t readback_sent_at = 0;
         uint8_t template_src = 0; // 0 genuine Master, 1 genuine indoor unit
-    } floorstanding_tx_;
-    struct FloorstandingDeferredRequest {
+        bool awaiting_template = false;
+        uint8_t template_refresh_attempts = 0;
+        uint32_t template_refresh_sent_at = 0;
+        uint32_t template_wait_last_log_at = 0;
+        bool template_refresh_echo_seen = false;
+        // One candidate per requested discharge write. Not a normal settings
+        // retry; a failed probe falls back to the proven full 28 readback.
+        uint8_t last_wire_write[MsgLen] = {};
+        bool selective_probe_attempted = false;
+        bool selective_probe_fallback_ready = false;
+        uint32_t selective_probe_sent_at = 0;
+    } floor_console_tx_;
+    struct FloorConsoleDeferredRequest {
         bool valid = false;
-        lg_floorstanding::Page page = lg_floorstanding::Page::Discharge;
+        lg_floor_console::Page page = lg_floor_console::Page::Discharge;
         uint8_t target = 0;
         uint32_t queued_at = 0;
-    } floorstanding_deferred_;
-    bool floorstanding_send_queued_ = false;
-    uint32_t floorstanding_last_finish_at_ = 0;
+    } floor_console_deferred_;
+    bool floor_console_send_queued_ = false;
+    uint32_t floor_console_last_finish_at_ = 0;
     static constexpr uint32_t FLOOR_TEMPLATE_MAX_AGE = 30u * 60u * 1000u;
     // Page-5/6 configuration can be sent only once on the indoor unit's
     // startup burst. Accept an observed indoor template for up to six hours
@@ -274,19 +307,30 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // A genuine 28 settings refresh can take 20-60s before the indoor CD/CE.10
     // arrives. Wait for readback before the second (and final) write.
     static constexpr uint32_t FLOOR_READBACK_SETTLE_MS = 2500u;
+    static constexpr uint32_t FLOOR_PASSIVE_DISCHARGE_WINDOW_MS = 12000u;
+    static constexpr uint32_t FLOOR_SELECTIVE_CD_TIMEOUT_MS = 10000u;
+    // Wait until the user has stopped choosing outlets before flooding the
+    // 100-baud bus with a full-settings readback. At most one query per burst.
+    static constexpr uint32_t FLOOR_FAST_QUIET_MS = 45000u;
+    static constexpr uint32_t FLOOR_FAST_VERIFY_TIMEOUT_MS = 90000u;
+    static constexpr uint32_t FLOOR_FAST_VERIFY_MAX_PENDING_MS = 180000u;
     static constexpr uint32_t FLOOR_READBACK_TIMEOUT_MS = 60000u;
     static constexpr uint32_t FLOOR_READBACK_GUARD_WAIT_MS = 20000u;
     static constexpr uint32_t FLOOR_TX_REPEAT_MS = 65000u;
     static constexpr uint32_t FLOOR_TX_DEADLINE_MS = 185000u;
     static constexpr uint32_t FLOOR_DEFER_TIMEOUT_MS = 185000u;
+    // At most two read-only Type-0 requests, then fail without ever writing
+    // a guessed page. The indoor full-settings batch may take 60+ seconds.
+    static constexpr uint32_t FLOOR_TEMPLATE_REFRESH_RETRY_MS = 75000u;
+    static constexpr uint8_t FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS = 2u;
 
-    text_sensor::TextSensor *floorstanding_comfort_master_ = nullptr;
-    text_sensor::TextSensor *floorstanding_comfort_indoor_ = nullptr;
-    text_sensor::TextSensor *floorstanding_direction_master_ = nullptr;
-    text_sensor::TextSensor *floorstanding_direction_indoor_ = nullptr;
-    text_sensor::TextSensor *floorstanding_step_master_ = nullptr;
-    text_sensor::TextSensor *floorstanding_step_indoor_ = nullptr;
-    text_sensor::TextSensor *floorstanding_comfort_capability_ = nullptr;
+    text_sensor::TextSensor *floor_console_comfort_master_ = nullptr;
+    text_sensor::TextSensor *floor_console_comfort_indoor_ = nullptr;
+    text_sensor::TextSensor *floor_console_direction_master_ = nullptr;
+    text_sensor::TextSensor *floor_console_direction_indoor_ = nullptr;
+    text_sensor::TextSensor *floor_console_step_master_ = nullptr;
+    text_sensor::TextSensor *floor_console_step_indoor_ = nullptr;
+    text_sensor::TextSensor *floor_console_comfort_capability_ = nullptr;
 
     // Slave-only read-only diagnostics. All are populated from observed unit packets.
     // Type-A CA installer setting 02 (central-control/unit address), HEX / decimal text.
@@ -404,7 +448,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     uint32_t last_write_millis_ = 0;
     uint32_t last_line_busy_millis_ = 0;
 
-    enum class PendingSendKind : uint8_t { None, Status, TypeA, TypeB, TypeBPipePoll, TypeBDiscovery, TypeE, TypeAReadback, Floorstanding, FloorstandingReadback };
+    enum class PendingSendKind : uint8_t { None, Status, TypeA, TypeB, TypeBPipePoll, TypeBDiscovery, TypeE, TypeAReadback, FloorConsole, FloorConsoleReadback, FloorConsoleTemplateRefresh, FloorConsoleSelectiveCDProbe };
     PendingSendKind pending_send_ = PendingSendKind::None;
 
     // Master-native Type-3 cancellation and indoor C8 confirmation.
@@ -783,38 +827,53 @@ public:
             });
         }
     }
-    void set_floorstanding_monitoring(bool value) { floorstanding_monitoring_ = value; }
-    void set_floorstanding_features(bool value) {
-        floorstanding_features_ = value;
-        if (value) floorstanding_monitoring_ = true;
+    void set_floor_console_monitoring(bool value) { floor_console_monitoring_ = value; }
+    void set_floor_console_features(bool value) {
+        floor_console_features_ = value;
+        if (value) floor_console_monitoring_ = true;
     }
-    void set_floorstanding_reversed_airflow(bool v) { floorstanding_reversed_airflow_ = v; }
+    void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
+    void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
+    void set_floor_console_fast_discharge(bool v) { floor_console_fast_discharge_ = v; }
+    void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
     void set_filter_remaining_percent_sensor(sensor::Sensor *s) { filter_remaining_percent_ = s; }
     void set_filter_nominal_life_hours(uint16_t hours) { filter_nominal_life_hours_ = hours; }
-    void set_floorstanding_command_status_text_sensor(text_sensor::TextSensor *s) { floorstanding_command_status_ = s; }
-    void set_floorstanding_controls(LgSwitch *comfort, LgSelect *direction, LgSelect *step) {
-        floorstanding_comfort_control_ = comfort;
-        floorstanding_direction_control_ = direction;
-        floorstanding_step_control_ = step;
-        if (comfort != nullptr) comfort->add_on_state_callback([this](bool value) {
-            if (!ignore_callbacks_) floorstanding_request_(lg_floorstanding::Page::Comfort, value ? 1 : 0);
+    void set_floor_console_command_status_text_sensor(text_sensor::TextSensor *s) { floor_console_command_status_ = s; }
+    void set_floor_console_controls(LgSwitch *comfort, LgSelect *direction, LgSelect *step) {
+        floor_console_comfort_control_ = comfort;
+        floor_console_direction_control_ = direction;
+        floor_console_step_control_ = step;
+        if (comfort != nullptr) comfort->set_request_handler([this](bool value) {
+            floor_console_request_(lg_floor_console::Page::Comfort, value ? 1 : 0);
         });
-        if (direction != nullptr) direction->add_on_state_callback([this](size_t index) {
-            if (!ignore_callbacks_) floorstanding_request_(lg_floorstanding::Page::Discharge, uint8_t(index));
+        if (direction != nullptr) direction->set_request_handler([this, direction](const std::string &option) {
+            for (size_t i = 0; i < 3; ++i) {
+                if (direction->at(i).has_value() && *direction->at(i) == option) {
+                    floor_console_request_(lg_floor_console::Page::Discharge, static_cast<uint8_t>(i));
+                    return;
+                }
+            }
+            floor_console_report_("REJECTED: unknown discharge selection");
         });
-        if (step != nullptr) step->add_on_state_callback([this](size_t index) {
-            if (!ignore_callbacks_) floorstanding_request_(lg_floorstanding::Page::Step, uint8_t(index));
+        if (step != nullptr) step->set_request_handler([this, step](const std::string &option) {
+            for (size_t i = 0; i < 3; ++i) {
+                if (step->at(i).has_value() && *step->at(i) == option) {
+                    floor_console_request_(lg_floor_console::Page::Step, static_cast<uint8_t>(i));
+                    return;
+                }
+            }
+            floor_console_report_("REJECTED: unknown comfort step selection");
         });
     }
-    void set_floorstanding_comfort_master_text_sensor(text_sensor::TextSensor *s) { floorstanding_comfort_master_ = s; }
-    void set_floorstanding_comfort_indoor_text_sensor(text_sensor::TextSensor *s) { floorstanding_comfort_indoor_ = s; }
-    void set_floorstanding_direction_master_text_sensor(text_sensor::TextSensor *s) { floorstanding_direction_master_ = s; }
-    void set_floorstanding_direction_indoor_text_sensor(text_sensor::TextSensor *s) { floorstanding_direction_indoor_ = s; }
-    void set_floorstanding_step_master_text_sensor(text_sensor::TextSensor *s) { floorstanding_step_master_ = s; }
-    void set_floorstanding_step_indoor_text_sensor(text_sensor::TextSensor *s) { floorstanding_step_indoor_ = s; }
-    void set_floorstanding_comfort_capability_text_sensor(text_sensor::TextSensor *s) { floorstanding_comfort_capability_ = s; }
+    void set_floor_console_comfort_master_text_sensor(text_sensor::TextSensor *s) { floor_console_comfort_master_ = s; }
+    void set_floor_console_comfort_indoor_text_sensor(text_sensor::TextSensor *s) { floor_console_comfort_indoor_ = s; }
+    void set_floor_console_direction_master_text_sensor(text_sensor::TextSensor *s) { floor_console_direction_master_ = s; }
+    void set_floor_console_direction_indoor_text_sensor(text_sensor::TextSensor *s) { floor_console_direction_indoor_ = s; }
+    void set_floor_console_step_master_text_sensor(text_sensor::TextSensor *s) { floor_console_step_master_ = s; }
+    void set_floor_console_step_indoor_text_sensor(text_sensor::TextSensor *s) { floor_console_step_indoor_ = s; }
+    void set_floor_console_comfort_capability_text_sensor(text_sensor::TextSensor *s) { floor_console_comfort_capability_ = s; }
     void set_advanced_settings_raw_text_sensor(text_sensor::TextSensor* s) { advanced_settings_raw_ = s; }
     void set_extended_settings_raw_text_sensor(text_sensor::TextSensor* s) { extended_settings_raw_ = s; }
 
@@ -1041,11 +1100,12 @@ public:
         ignore_callbacks_ = false;
 
         // Configure climate traits and entities based on the capabilities message (if available)
-        ESP_LOGI(TAG, "LG CONTROLLER V2.0.0 baseline: sleep-safe diagnostic discovery default ON; "
-                      "Type-A early-write preflight enabled");
+        ESP_LOGI(TAG, "LG CONTROLLER V2.0.1 candidate: V2 baseline with floor-console template recovery; "
+                      "sleep-safe standard-unit discovery and Type-A preflight retained");
         configure_capabilities();
-        if (floorstanding_features_) {
-            ESP_LOGI(TAG, "FLOORSTANDING EXPERIMENT 1.8.8-RB-QUEUE: guarded 28 readback; latest-choice queue; two bounded page writes");
+        if (floor_console_features_) {
+            ESP_LOGI(TAG, "FLOOR CONSOLE V2.0.1: guarded read-before-write template recovery; "
+                          "confirmed-state Home Assistant controls; bounded readbacks and writes");
         }
 
         while (UARTDevice::available() > 0) {
@@ -1263,13 +1323,22 @@ public:
                 case PendingSendKind::TypeE:
                     pending_type_e_settings_change_ = true;
                     break;
-                case PendingSendKind::Floorstanding:
+                case PendingSendKind::FloorConsole:
                     // No echo: abort this experiment, not a blind retry.
-                    floorstanding_finish_("No UART echo; command not confirmed", false);
+                    floor_console_finish_("No UART echo; command not confirmed", false);
                     break;
-                case PendingSendKind::FloorstandingReadback:
+                case PendingSendKind::FloorConsoleReadback:
                     ESP_LOGW(TAG, "FLOOR READBACK: 28 request had no UART echo; cannot verify acceptance");
-                    floorstanding_tx_.readback_queued = false;
+                    floor_console_tx_.readback_queued = false;
+                    break;
+                case PendingSendKind::FloorConsoleTemplateRefresh:
+                    ESP_LOGW(TAG, "FLOOR TEMPLATE: guarded 28 request had no UART echo; "
+                                  "waiting for genuine AD/CD/CE.10 (no settings write)");
+                    break;
+                case PendingSendKind::FloorConsoleSelectiveCDProbe:
+                    ESP_LOGW(TAG, "FLOOR SELECTIVE: no UART echo for unverified 2D.80 candidate; "
+                                  "falling back to guarded 28 readback");
+                    floor_console_tx_.selective_probe_fallback_ready = true;
                     break;
                 case PendingSendKind::None:
                     ESP_LOGE(TAG, "unreachable");
@@ -1313,9 +1382,9 @@ public:
             slave_fan_cal_finish_(false, "indoor CA confirmation timed out");
             pending_type_a_settings_change_ = false;
         }
-        // Experimental floor-standing transactions share the exact existing
+        // Experimental floor console transactions share the exact existing
         // bus-idle check and pending_send echo handling with all other writes.
-        floorstanding_maintain_(millis_now);
+        floor_console_maintain_(millis_now);
         // Send if there's a pending message.
         if (pending_send_ == PendingSendKind::None &&
             (millis_now - last_line_busy_millis_ > 500) &&
@@ -1334,20 +1403,33 @@ public:
             } else if (slave_fan_cal_readback_queued_) {
                 // Read back the ONE installer write before any other optional Type-A work.
                 send_slave_esp_readback_();
-            } else if (floorstanding_tx_.active && !floorstanding_tx_.superseded &&
-                       floorstanding_tx_.readback_queued &&
+            } else if (floor_console_tx_.active && !floor_console_tx_.superseded &&
+                       floor_console_tx_.readback_queued &&
                        !pending_status_change_ && !slave_ack_pending_ &&
                        !slave_fan_cal_pending_ && !pending_type_a_settings_change_ &&
                        !pending_type_b_settings_change_ && !pending_type_b_timed_message_ &&
                        !pending_type_e_settings_change_) {
-                send_floorstanding_readback_();
-            } else if (floorstanding_send_queued_ && floorstanding_tx_.active &&
-                       !floorstanding_tx_.superseded && !pending_status_change_ &&
+                send_floor_console_readback_();
+            } else if (floor_console_tx_.active && !floor_console_tx_.superseded &&
+                       floor_console_tx_.awaiting_template &&
+                       !pending_status_change_ && !slave_ack_pending_ &&
+                       !slave_fan_cal_pending_ &&
+                       !pending_type_a_settings_change_ &&
+                       !pending_type_b_settings_change_ && !pending_type_b_timed_message_ &&
+                       !pending_type_e_settings_change_ &&
+                       lg_floor_console::template_refresh_due(
+                           floor_console_tx_.template_refresh_attempts,
+                           uint32_t(millis_now - floor_console_tx_.template_refresh_sent_at),
+                           FLOOR_TEMPLATE_REFRESH_RETRY_MS,
+                           FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS)) {
+                send_floor_console_template_refresh_();
+            } else if (floor_console_send_queued_ && floor_console_tx_.active &&
+                       !floor_console_tx_.superseded && !pending_status_change_ &&
                        !slave_ack_pending_ && !slave_fan_cal_pending_ &&
                        !pending_type_a_settings_change_ &&
                        !pending_type_b_settings_change_ && !pending_type_b_timed_message_ &&
                        !pending_type_e_settings_change_) {
-                send_floorstanding_message_();
+                send_floor_console_message_();
             } else if (pending_type_a_settings_change_ &&
                        !(slave_ && slave_fan_cal_pending_ && slave_fan_cal_write_sent_)) {
                 send_type_a_settings_message();
@@ -1358,6 +1440,15 @@ public:
                 pending_type_b_timed_message_ = false;
             } else if (pending_type_e_settings_change_) {
                 send_type_e_settings_message();
+            } else if (floor_console_fast_discharge_ && lg_floor_console::fast_verify_due(
+                           floor_fast_verify_pending_, floor_fast_verify_sent_,
+                           floor_console_tx_.active, floor_console_deferred_.valid,
+                           lg_floor_console::fast_elapsed_ms(millis_now, floor_fast_verify_queued_at_), FLOOR_FAST_QUIET_MS) &&
+                       !active_reservation_ && !slave_sleep_master_active_ &&
+                       !sleep_timer_target_millis_.has_value()) {
+                // Lowest-priority coalesced readback. Skip if we cannot build
+                // a known-safe Type-0 settings request from recent A8/C8.
+                send_floor_console_fast_verify_();
             } else if (pending_slave_pipe_discovery_) {
                 // Optional telemetry discovery always has lowest priority.
                 pending_slave_pipe_discovery_ = false;
@@ -2203,10 +2294,10 @@ private:
                 uint32_t(now - last_unit_status_for_pipe_millis_));
         }
         // V2 rollout scope: active-sleep bootstrap has been verified on two
-        // ordinary units, not the Garden Office floor-standing hardware.
-        // Preserve the previous floor-standing policy when sleep is active;
+        // ordinary units, not the Garden Office floor console hardware.
+        // Preserve the previous floor console policy when sleep is active;
         // a read-only no-reservation discovery is still permitted there.
-        if (floorstanding_features_) return false;
+        if (floor_console_features_) return false;
         // Do not mistake an On/Off schedule or unknown active reservation
         // for a type-3 sleep reservation. The alternating flag report must
         // explicitly carry its sleep flag, and the status must be settled.
@@ -2440,12 +2531,26 @@ private:
             // status message because some units set the vane position
             // to the default setting after changing swing mode or
             // operation mode.
-            if (pending_send_ == PendingSendKind::Floorstanding) {
-                floorstanding_tx_.echo_seen = true;
+            if (pending_send_ == PendingSendKind::FloorConsole) {
+                floor_console_tx_.echo_seen = true;
                 ESP_LOGI(TAG, "FLOOR TX: UART echo verified; not an indoor acceptance");
+                if (floor_console_fast_discharge_ && slave_ && floor_console_tx_.active &&
+                    !floor_console_tx_.superseded &&
+                    floor_console_tx_.page == lg_floor_console::Page::Discharge) {
+                    floor_console_fast_complete_();
+                }
             }
-            if (pending_send_ == PendingSendKind::FloorstandingReadback) {
+            if (pending_send_ == PendingSendKind::FloorConsoleReadback) {
+                if (floor_fast_verify_pending_ && floor_fast_verify_sent_)
+                    floor_fast_verify_echo_seen_ = true;
                 ESP_LOGI(TAG, "FLOOR READBACK: 28 UART echo verified; awaiting genuine CD/CC/CE.10");
+            }
+            if (pending_send_ == PendingSendKind::FloorConsoleSelectiveCDProbe) {
+                ESP_LOGI(TAG, "FLOOR SELECTIVE: 2D.80 UART echo verified, NOT proof of selective read or indoor acceptance; awaiting CD");
+            }
+            if (pending_send_ == PendingSendKind::FloorConsoleTemplateRefresh) {
+                floor_console_tx_.template_refresh_echo_seen = true;
+                ESP_LOGI(TAG, "FLOOR TEMPLATE: guarded 28 UART echo verified; awaiting genuine page (not confirmation of control)");
             }
             if (pending_send_ == PendingSendKind::TypeBPipePoll) {
                 ESP_LOGD(TAG, "SLAVE PIPE POLL: UART echo verified; awaiting indoor CB (not proof of response)");
@@ -3098,10 +3203,10 @@ private:
             ESP_LOGE(TAG, "ignoring capabilities message not from unit");
             return;
         }
-        if (floorstanding_monitoring_) {
-            const char *value = lg_floorstanding::supports_comfort_cooling(buffer)
+        if (floor_console_monitoring_) {
+            const char *value = lg_floor_console::supports_comfort_cooling(buffer)
                 ? "Advertised in C9" : "Not advertised in C9";
-            floorstanding_publish_observation_(floorstanding_comfort_capability_,
+            floor_console_publish_observation_(floor_console_comfort_capability_,
                 "Indoor C9 comfort capability", value, buffer);
         }
 
@@ -3400,8 +3505,8 @@ private:
     }
 
     void process_type_c_status_message(MessageSender sender, const uint8_t* buffer) {
-        floorstanding_observe_page_(sender, 4, buffer);
-        floorstanding_observe_write_(sender, lg_floorstanding::Page::Comfort, buffer);
+        floor_console_observe_page_(sender, 4, buffer);
+        floor_console_observe_write_(sender, lg_floor_console::Page::Comfort, buffer);
         if (sender != MessageSender::Unit) {
             return;
         }
@@ -3437,30 +3542,30 @@ private:
         return (uint16_t(buffer[offset]) << 8) | buffer[offset + 1];
     }
 
-    static unsigned floor_page_index_(lg_floorstanding::Page page) {
+    static unsigned floor_page_index_(lg_floor_console::Page page) {
         return static_cast<unsigned>(page) - 4u;
     }
 
-    void floorstanding_report_(const std::string &message) {
-        publish_if_changed_(floorstanding_command_status_, message);
+    void floor_console_report_(const std::string &message) {
+        publish_if_changed_(floor_console_command_status_, message);
         ESP_LOGI(TAG, "FLOOR TX: %s", message.c_str());
     }
 
-    void floorstanding_publish_control_(lg_floorstanding::Page page, uint8_t code) {
-        if (!lg_floorstanding::valid_value(page, code)) return;
+    void floor_console_publish_control_(lg_floor_console::Page page, uint8_t code) {
+        if (!lg_floor_console::valid_value(page, code)) return;
         ignore_callbacks_ = true;
         switch (page) {
-            case lg_floorstanding::Page::Comfort:
-                if (floorstanding_comfort_control_ != nullptr)
-                    floorstanding_comfort_control_->publish_state(code != 0);
+            case lg_floor_console::Page::Comfort:
+                if (floor_console_comfort_control_ != nullptr)
+                    floor_console_comfort_control_->publish_state(code != 0);
                 break;
-            case lg_floorstanding::Page::Discharge:
-                if (floorstanding_direction_control_ != nullptr)
-                    floorstanding_direction_control_->publish_state(*floorstanding_direction_control_->at(code));
+            case lg_floor_console::Page::Discharge:
+                if (floor_console_direction_control_ != nullptr)
+                    floor_console_direction_control_->publish_state(*floor_console_direction_control_->at(code));
                 break;
-            case lg_floorstanding::Page::Step:
-                if (floorstanding_step_control_ != nullptr)
-                    floorstanding_step_control_->publish_state(*floorstanding_step_control_->at(code));
+            case lg_floor_console::Page::Step:
+                if (floor_console_step_control_ != nullptr)
+                    floor_console_step_control_->publish_state(*floor_console_step_control_->at(code));
                 break;
         }
         ignore_callbacks_ = false;
@@ -3469,16 +3574,16 @@ private:
     // -1: no usable source; 0: Master; 1: indoor unit.
     // Prefer the freshest valid page. The physical Master may only emit AD
     // when a user operates its menu; CD after a forced readback is newer.
-    int floorstanding_source_index_(lg_floorstanding::Page page, uint32_t now) const {
+    int floor_console_source_index_(lg_floor_console::Page page, uint32_t now) const {
         const unsigned p = floor_page_index_(page);
-        const bool master_fresh = slave_ && floorstanding_template_valid_[p][0] &&
-            uint32_t(now - floorstanding_template_at_[p][0]) <= FLOOR_TEMPLATE_MAX_AGE;
-        const uint32_t indoor_limit = page == lg_floorstanding::Page::Comfort
+        const bool master_fresh = slave_ && floor_console_template_valid_[p][0] &&
+            uint32_t(now - floor_console_template_at_[p][0]) <= FLOOR_TEMPLATE_MAX_AGE;
+        const uint32_t indoor_limit = page == lg_floor_console::Page::Comfort
             ? FLOOR_TEMPLATE_MAX_AGE : FLOOR_INDOOR_STATIC_MAX_AGE;
-        const bool indoor_fresh = floorstanding_template_valid_[p][1] &&
-            uint32_t(now - floorstanding_template_at_[p][1]) <= indoor_limit;
+        const bool indoor_fresh = floor_console_template_valid_[p][1] &&
+            uint32_t(now - floor_console_template_at_[p][1]) <= indoor_limit;
         if (master_fresh && indoor_fresh)
-            return lg_floorstanding::frame_is_newer(floorstanding_template_at_[p][0], floorstanding_template_at_[p][1]) ? 0 : 1;
+            return lg_floor_console::frame_is_newer(floor_console_template_at_[p][0], floor_console_template_at_[p][1]) ? 0 : 1;
         if (master_fresh) return 0;
         if (indoor_fresh) return 1;
         return -1;
@@ -3486,106 +3591,200 @@ private:
 
     // The most recently heard *real* Master or indoor report is the best
     // available UI fallback. It does not imply acceptance of our Slave write.
-    void floorstanding_restore_observed_(lg_floorstanding::Page page) {
-        const int src = floorstanding_source_index_(page, millis());
+    void floor_console_restore_observed_(lg_floor_console::Page page) {
+        const int src = floor_console_source_index_(page, millis());
         if (src < 0) return;
-        floorstanding_publish_control_(page,
-            lg_floorstanding::value(floorstanding_templates_[floor_page_index_(page)][src], page));
+        floor_console_publish_control_(page,
+            lg_floor_console::value(floor_console_templates_[floor_page_index_(page)][src], page));
     }
 
-    bool floorstanding_busy_for_start_() const {
-        return is_initializing_ || floorstanding_tx_.active ||
+    bool floor_console_busy_for_start_() const {
+        return is_initializing_ || floor_console_tx_.active ||
             pending_send_ != PendingSendKind::None || pending_status_change_ ||
             slave_ack_pending_ || slave_fan_cal_pending_ ||
             pending_type_a_settings_change_ || pending_type_b_settings_change_ ||
             pending_type_e_settings_change_ || pending_type_b_timed_message_;
     }
 
-    void floorstanding_start_(lg_floorstanding::Page page, uint8_t requested, uint32_t now) {
+    void floor_console_start_(lg_floor_console::Page page, uint8_t requested, uint32_t now) {
+        if (floor_console_fast_discharge_ && slave_ && page == lg_floor_console::Page::Discharge) {
+            // Last HA choice wins. Any prior delayed verification belongs to
+            // an older request and must never confirm this newer selection.
+            floor_fast_verify_pending_ = false;
+            floor_fast_verify_sent_ = false;
+            floor_fast_verify_echo_seen_ = false;
+            floor_fast_cd_verifier_.reset(requested);
+        }
         const unsigned p = floor_page_index_(page);
-        const int src = floorstanding_source_index_(page, now);
-        if (src < 0) {
-            floorstanding_report_("BLOCKED: no genuine page template available; no packet sent");
-            floorstanding_restore_observed_(page);
+        const int src = floor_console_source_index_(page, now);
+        if (src < 0 && !slave_) {
+            floor_console_report_("BLOCKED: no genuine indoor page template available in Master mode; no packet sent");
             return;
         }
         // Never suppress a requested Both/Top/Bottom change based solely on
         // an older Master AD or an old indoor CD. Such shortcuts caused Both
         // to be silently skipped after a previous ESP32 adjustment.
-        floorstanding_tx_ = FloorstandingTransaction{};
-        floorstanding_tx_.active = true;
-        floorstanding_tx_.page = page;
-        floorstanding_tx_.target = requested;
-        floorstanding_tx_.requested_at = now;
-        floorstanding_tx_.template_src = static_cast<uint8_t>(src);
-        floorstanding_send_queued_ = true;
-        floorstanding_report_("QUEUED: awaiting free LG bus; indoor acceptance not yet checked");
+        floor_console_tx_ = FloorConsoleTransaction{};
+        floor_console_tx_.active = true;
+        floor_console_tx_.page = page;
+        floor_console_tx_.target = requested;
+        floor_console_tx_.requested_at = now;
+        if (src < 0) {
+            floor_console_tx_.awaiting_template = true;
+            floor_console_report_("WAITING FOR TEMPLATE: requesting genuine LG page before write; no control packet sent");
+        } else {
+            floor_console_tx_.template_src = static_cast<uint8_t>(src);
+            floor_console_send_queued_ = true;
+            floor_console_report_("QUEUED: awaiting free LG bus; indoor acceptance not yet checked");
+        }
     }
 
-    void floorstanding_finish_(const char *why, bool success) {
-        if (!floorstanding_tx_.active) return;
-        const auto page = floorstanding_tx_.page;
-        const auto target = floorstanding_tx_.target;
-        const unsigned repeats = floorstanding_tx_.transmissions;
-        const bool superseded = floorstanding_tx_.superseded;
-        floorstanding_tx_ = FloorstandingTransaction{};
-        floorstanding_send_queued_ = false;
-        floorstanding_last_finish_at_ = millis();
-        if (pending_send_ == PendingSendKind::Floorstanding ||
-            pending_send_ == PendingSendKind::FloorstandingReadback)
+    void floor_console_finish_(const char *why, bool success) {
+        if (!floor_console_tx_.active) return;
+        const auto page = floor_console_tx_.page;
+        const auto target = floor_console_tx_.target;
+        const unsigned repeats = floor_console_tx_.transmissions;
+        const bool superseded = floor_console_tx_.superseded;
+        floor_console_tx_ = FloorConsoleTransaction{};
+        floor_console_send_queued_ = false;
+        floor_console_last_finish_at_ = millis();
+        if (pending_send_ == PendingSendKind::FloorConsole ||
+            pending_send_ == PendingSendKind::FloorConsoleReadback ||
+            pending_send_ == PendingSendKind::FloorConsoleSelectiveCDProbe)
             pending_send_ = PendingSendKind::None;
         if (superseded) {
-            floorstanding_report_("SUPERSEDED: newer HA selection waiting; stopped old retries");
+            floor_console_report_("SUPERSEDED: newer HA selection waiting; stopped old retries");
             // Do NOT revert the UI to an old AD/CD while the newer choice
             // remains queued. The deferred request will execute when idle.
             return;
         }
-        floorstanding_report_(std::string(success ? "CONFIRMED: " : "UNVERIFIED: ") + why +
+        floor_console_report_(std::string(success ? "CONFIRMED: " : "UNVERIFIED: ") + why +
                               " (page " + std::to_string(static_cast<unsigned>(page)) +
                               ", " + std::to_string(repeats) + " TX)");
-        if (success) floorstanding_publish_control_(page, target);
-        else floorstanding_restore_observed_(page);
+        if (success) floor_console_publish_control_(page, target);
+        else floor_console_restore_observed_(page);
+    }
+
+    // After a verified local echo, release the bus and let further discharge
+    // selections proceed without a 60-second settings burst. The visible
+    // select is explicitly optimistic until a genuine CD appears later.
+    void floor_console_fast_complete_() {
+        const auto target = floor_console_tx_.target;
+        floor_console_tx_ = FloorConsoleTransaction{};
+        floor_console_send_queued_ = false;
+        floor_console_last_finish_at_ = millis();
+        floor_fast_verify_pending_ = true;
+        floor_fast_verify_sent_ = false;
+        floor_fast_verify_echo_seen_ = false;
+        floor_fast_cd_verifier_.reset(target);
+        floor_fast_verify_target_ = target;
+        floor_fast_verify_queued_at_ = millis();
+        floor_fast_verify_sent_at_ = 0;
+        floor_console_publish_control_(lg_floor_console::Page::Discharge, target);
+        floor_console_report_("SENT (UNVERIFIED): discharge command echoed; one coalesced indoor CD readback will follow after 45s quiet");
+    }
+
+    void send_floor_console_fast_verify_() {
+        if (!slave_ || !floor_fast_verify_pending_ || floor_fast_verify_sent_ ||
+            !have_master_status_ || !have_unit_status_for_pipe_ ||
+            !SlavePipeTempDiscovery::make_request(
+                send_buf_, last_master_status_, last_unit_status_for_pipe_,
+                uint32_t(millis() - last_master_status_for_pipe_millis_),
+                uint32_t(millis() - last_unit_status_for_pipe_millis_))) return;
+        send_buf_[12] = calc_checksum(send_buf_);
+        floor_fast_verify_sent_ = true;
+        floor_fast_verify_echo_seen_ = false;
+        floor_fast_verify_sent_at_ = millis();
+        ESP_LOGI(TAG, "FLOOR FAST: one coalesced guarded 28 readback after 45s quiet; awaiting two indoor CD frames");
+        ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
+        UARTDevice::write_array(send_buf_, MsgLen);
+        last_write_millis_ = millis();
+        pending_send_ = PendingSendKind::FloorConsoleReadback;
     }
 
     // Latest choice wins while an earlier 2D, 2C or 2E request is pending.
     // We never transmit two settings pages concurrently or unbounded retries.
-    void floorstanding_request_(lg_floorstanding::Page page, uint8_t requested) {
-        if (!floorstanding_features_ || !lg_floorstanding::valid_value(page, requested)) return;
+    void floor_console_request_(lg_floor_console::Page page, uint8_t requested) {
+        if (!floor_console_features_ || !lg_floor_console::valid_value(page, requested)) return;
         const uint32_t now = millis();
-        if (floorstanding_tx_.active || floorstanding_busy_for_start_() ||
-            floorstanding_deferred_.valid) {
-            if (floorstanding_tx_.active && floorstanding_tx_.page == page &&
-                floorstanding_tx_.target == requested && !floorstanding_deferred_.valid) {
-                floorstanding_report_("IN PROGRESS: same setting already requested");
+        if (floor_console_tx_.active || floor_console_busy_for_start_() ||
+            floor_console_deferred_.valid) {
+            if (floor_console_tx_.active && floor_console_tx_.page == page &&
+                floor_console_tx_.target == requested && !floor_console_deferred_.valid) {
+                floor_console_report_("IN PROGRESS: same setting already requested");
                 return;
             }
-            floorstanding_deferred_ = FloorstandingDeferredRequest{};
-            floorstanding_deferred_.valid = true;
-            floorstanding_deferred_.page = page;
-            floorstanding_deferred_.target = requested;
-            floorstanding_deferred_.queued_at = now;
-            if (floorstanding_tx_.active) {
-                floorstanding_tx_.superseded = true;
-                floorstanding_send_queued_ = false;
-                floorstanding_tx_.readback_queued = false;
+            floor_console_deferred_ = FloorConsoleDeferredRequest{};
+            floor_console_deferred_.valid = true;
+            floor_console_deferred_.page = page;
+            floor_console_deferred_.target = requested;
+            floor_console_deferred_.queued_at = now;
+            if (floor_console_tx_.active) {
+                floor_console_tx_.superseded = true;
+                floor_console_send_queued_ = false;
+                floor_console_tx_.readback_queued = false;
             }
-            floorstanding_report_("DEFERRED: latest HA selection retained; waiting for safe bus slot");
+            floor_console_report_("DEFERRED: latest HA selection retained; waiting for safe bus slot");
             return;
         }
-        floorstanding_start_(page, requested, now);
+        floor_console_start_(page, requested, now);
     }
 
-    void floorstanding_maintain_(uint32_t now) {
-        if (floorstanding_tx_.active) {
-            auto &tx = floorstanding_tx_;
+    void floor_console_maintain_(uint32_t now) {
+        if (floor_fast_verify_pending_) {
+            const uint32_t elapsed = floor_fast_verify_sent_
+                ? lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_sent_at_)
+                : lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_queued_at_);
+            if ((floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_TIMEOUT_MS) ||
+                (!floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_MAX_PENDING_MS)) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("UNVERIFIED: no timely genuine indoor CD; optimistic discharge selection may be stale");
+                // Do not restore a potentially stale pre-command CD as the
+                // new physical state. Next genuine CD will resynchronise HA.
+            }
+        }
+        if (floor_console_tx_.active) {
+            auto &tx = floor_console_tx_;
             if (tx.superseded) {
                 // Wait for an already transmitted frame's local UART echo.
-                if (pending_send_ != PendingSendKind::Floorstanding &&
-                    pending_send_ != PendingSendKind::FloorstandingReadback)
-                    floorstanding_finish_("superseded", false);
+                if (pending_send_ != PendingSendKind::FloorConsole &&
+                    pending_send_ != PendingSendKind::FloorConsoleReadback &&
+                    pending_send_ != PendingSendKind::FloorConsoleSelectiveCDProbe)
+                    floor_console_finish_("superseded", false);
             } else if (uint32_t(now - tx.requested_at) > FLOOR_TX_DEADLINE_MS) {
-                floorstanding_finish_("fresh indoor readback did not confirm selected value", false);
+                floor_console_finish_(tx.awaiting_template
+                    ? "genuine page template not received before deadline; no settings write"
+                    : "fresh indoor readback did not confirm selected value", false);
+            } else if (tx.awaiting_template) {
+                // An AD/CD/CE.10 from either genuine source is a prerequisite,
+                // not evidence that the requested option was applied.
+                const int src = floor_console_source_index_(tx.page, now);
+                if (src >= 0) {
+                    tx.awaiting_template = false;
+                    tx.template_src = static_cast<uint8_t>(src);
+                    floor_console_send_queued_ = true;
+                    floor_console_report_("TEMPLATE READY: genuine page received; write queued, acceptance still unverified");
+                } else if (uint32_t(now - tx.requested_at) >= 15000u &&
+                           (tx.template_wait_last_log_at == 0 ||
+                            uint32_t(now - tx.template_wait_last_log_at) >= 30000u)) {
+                    tx.template_wait_last_log_at = now;
+                    ESP_LOGW(TAG, "FLOOR TEMPLATE: waiting for safe Master/indoor status "
+                                  "or genuine page %u; sleep-active or mismatched statuses block "
+                                  "the read (attempts %u/%u)",
+                             unsigned(tx.page), unsigned(tx.template_refresh_attempts),
+                             unsigned(FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS));
+                }
             } else if (tx.transmissions > 0 && tx.echo_seen) {
+                // The speculative Type-D probe gets only a short observation
+                // window, then we request the known safe full settings page.
+                if (tx.selective_probe_attempted &&
+                    !tx.selective_probe_fallback_ready &&
+                    uint32_t(now - tx.selective_probe_sent_at) >= FLOOR_SELECTIVE_CD_TIMEOUT_MS) {
+                    tx.selective_probe_fallback_ready = true;
+                    ESP_LOGW(TAG, "FLOOR SELECTIVE: no two matching indoor CD reports "
+                                  "within 10s of 2D.80 candidate; trying guarded 28 fallback");
+                }
                 // A guarded readback must not block the queue indefinitely
                 // if no safe synchronized Master/indoor Type-0 pair exists.
                 if (tx.readback_queued &&
@@ -3596,46 +3795,113 @@ private:
                 }
                 // One guarded 28 request per write, rather than waiting for
                 // a CD report the unit does not broadcast spontaneously.
-                if (lg_floorstanding::readback_due(slave_, tx.transmissions,
+                const uint32_t readback_settle = lg_floor_console::readback_settle_ms(
+                    slave_, tx.page, floor_console_passive_readback_,
+                    FLOOR_READBACK_SETTLE_MS, FLOOR_PASSIVE_DISCHARGE_WINDOW_MS);
+                if ((!tx.selective_probe_attempted || tx.selective_probe_fallback_ready) &&
+                    lg_floor_console::readback_due(slave_, tx.transmissions,
                     tx.readback_attempts, tx.echo_seen, tx.readback_queued,
-                    uint32_t(now - tx.transmitted_at), FLOOR_READBACK_SETTLE_MS)) {
+                    uint32_t(now - tx.transmitted_at), readback_settle)) {
                     tx.readback_queued = true;
                     tx.readback_queued_at = now;
+                    if (floor_console_passive_readback_ &&
+                        tx.page == lg_floor_console::Page::Discharge)
+                        ESP_LOGI(TAG, "FLOOR PASSIVE: no spontaneous two-CD confirmation "
+                                      "within %us; queuing existing guarded 28 full-refresh fallback",
+                                 unsigned(FLOOR_PASSIVE_DISCHARGE_WINDOW_MS / 1000u));
                 }
                 // A full settings batch may take a minute. Only retry after
                 // allowing a complete readback, not automatically at 10 s.
-                if (lg_floorstanding::retry_due(tx.transmissions,
-                    tx.readback_queued, floorstanding_send_queued_,
+                if (lg_floor_console::retry_due(tx.transmissions,
+                    tx.readback_queued, floor_console_send_queued_,
                     uint32_t(now - tx.transmitted_at), FLOOR_TX_REPEAT_MS) &&
                     (tx.readback_sent_at == 0 ||
                      uint32_t(now - tx.readback_sent_at) >= FLOOR_READBACK_TIMEOUT_MS) &&
                     pending_send_ == PendingSendKind::None)
-                    floorstanding_send_queued_ = true;
+                    floor_console_send_queued_ = true;
             }
         }
-        if (!floorstanding_tx_.active && floorstanding_deferred_.valid) {
-            if (uint32_t(now - floorstanding_deferred_.queued_at) > FLOOR_DEFER_TIMEOUT_MS) {
-                const auto page = floorstanding_deferred_.page;
-                floorstanding_deferred_ = FloorstandingDeferredRequest{};
-                floorstanding_report_("DEFERRED EXPIRED: LG bus unavailable; no packet sent");
-                floorstanding_restore_observed_(page);
-            } else if (!floorstanding_busy_for_start_() &&
-                       uint32_t(now - floorstanding_last_finish_at_) >= 1500u) {
-                const auto queued = floorstanding_deferred_;
-                floorstanding_deferred_ = FloorstandingDeferredRequest{};
-                floorstanding_start_(queued.page, queued.target, now);
+        if (!floor_console_tx_.active && floor_console_deferred_.valid) {
+            if (uint32_t(now - floor_console_deferred_.queued_at) > FLOOR_DEFER_TIMEOUT_MS) {
+                const auto page = floor_console_deferred_.page;
+                floor_console_deferred_ = FloorConsoleDeferredRequest{};
+                floor_console_report_("DEFERRED EXPIRED: LG bus unavailable; no packet sent");
+                floor_console_restore_observed_(page);
+            } else if (!floor_console_busy_for_start_() &&
+                       uint32_t(now - floor_console_last_finish_at_) >= 1500u) {
+                const auto queued = floor_console_deferred_;
+                floor_console_deferred_ = FloorConsoleDeferredRequest{};
+                floor_console_start_(queued.page, queued.target, now);
             }
         }
+    }
+
+    // Read-before-write recovery. The requesting select/switch stays at its
+    // last observed value until two matching indoor page reports confirm it.
+    // Never fabricate a Type-5/6 page or turn a read query into a settings write.
+    void send_floor_console_template_refresh_() {
+        auto &tx = floor_console_tx_;
+        if (!slave_ || !tx.active || tx.superseded || !tx.awaiting_template ||
+            !lg_floor_console::template_refresh_due(
+                tx.template_refresh_attempts,
+                uint32_t(millis() - tx.template_refresh_sent_at),
+                FLOOR_TEMPLATE_REFRESH_RETRY_MS, FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS)) return;
+        const uint32_t now = millis();
+        // Floor consoles retain their existing no-active-reservation policy.
+        // The validated settings query will refuse conflicting/stale A8/C8,
+        // any active timer and unsafe transition frames.
+        if (!have_master_status_ || !have_unit_status_for_pipe_ ||
+            (last_master_status_[1] & 0x01u) ||  // no unsettled Master change
+            !SlavePipeTempDiscovery::make_request(
+                send_buf_, last_master_status_, last_unit_status_for_pipe_,
+                uint32_t(now - last_master_status_for_pipe_millis_),
+                uint32_t(now - last_unit_status_for_pipe_millis_))) return;
+        send_buf_[12] = calc_checksum(send_buf_);
+        ++tx.template_refresh_attempts;
+        tx.template_refresh_sent_at = now;
+        tx.template_refresh_echo_seen = false;
+        ESP_LOGI(TAG, "FLOOR TEMPLATE: guarded 28 full-settings READ for page %u "
+                      "(attempt %u/%u); awaiting genuine AD/CD/CE.10; no settings write",
+                 unsigned(tx.page), unsigned(tx.template_refresh_attempts),
+                 unsigned(FLOOR_TEMPLATE_REFRESH_MAX_ATTEMPTS));
+        ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
+        UARTDevice::write_array(send_buf_, MsgLen);
+        last_write_millis_ = now;
+        pending_send_ = PendingSendKind::FloorConsoleTemplateRefresh;
     }
 
     // Type-0 0x40 request is a read-only full-settings query. No guessed
     // installer page: reuse exactly the same pair-validated helper as the
     // successful startup CA/CB/CD/CE.10 discovery. Never issue during a
     // normal climate command or a pending fan-calibration write.
-    void send_floorstanding_readback_() {
-        auto &tx = floorstanding_tx_;
+    void send_floor_console_readback_() {
+        auto &tx = floor_console_tx_;
         if (!slave_ || !tx.active || tx.superseded || !tx.readback_queued) return;
         const uint32_t now = millis();
+        // Unverified Type-D page-5 selective read candidate. Only transmit
+        // when explicitly enabled, once for an actual HA discharge change,
+        // with a genuine checksum-valid 2D write already sent. Keep the
+        // setting identical to the write in case this is not a read opcode.
+        // Active sleep/reservations are excluded from this wire experiment.
+        if (floor_console_selective_cd_probe_ && !floor_console_fast_discharge_ &&
+            tx.page == lg_floor_console::Page::Discharge &&
+            !tx.selective_probe_attempted &&
+            !active_reservation_ && !slave_sleep_master_active_ &&
+            !sleep_timer_target_millis_.has_value() &&
+            !floor_console_passive_readback_ &&
+            lg_floor_console::build_selective_cd_probe(send_buf_, tx.last_wire_write)) {
+            tx.readback_queued = false;
+            tx.selective_probe_attempted = true;
+            tx.selective_probe_sent_at = now;
+            ESP_LOGW(TAG, "FLOOR SELECTIVE EXPERIMENT: transmitting UNVERIFIED 2D.80 candidate "
+                          "for page 5; this MAY be interpreted as a settings write; "
+                          "no change to requested direction, one attempt only");
+            ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
+            UARTDevice::write_array(send_buf_, MsgLen);
+            last_write_millis_ = now;
+            pending_send_ = PendingSendKind::FloorConsoleSelectiveCDProbe;
+            return;
+        }
         if (!have_master_status_ || !have_unit_status_for_pipe_ ||
             !SlavePipeTempDiscovery::make_request(
                 send_buf_, last_master_status_, last_unit_status_for_pipe_,
@@ -3655,28 +3921,28 @@ private:
         ESP_LOGD(TAG, "sending %s", format_hex_pretty(send_buf_, MsgLen).c_str());
         UARTDevice::write_array(send_buf_, MsgLen);
         last_write_millis_ = now;
-        pending_send_ = PendingSendKind::FloorstandingReadback;
+        pending_send_ = PendingSendKind::FloorConsoleReadback;
     }
 
-    void send_floorstanding_message_() {
-        if (!floorstanding_tx_.active || floorstanding_tx_.superseded) {
-            floorstanding_send_queued_ = false;
+    void send_floor_console_message_() {
+        if (!floor_console_tx_.active || floor_console_tx_.superseded) {
+            floor_console_send_queued_ = false;
             return;
         }
-        auto &tx = floorstanding_tx_;
+        auto &tx = floor_console_tx_;
         const unsigned p = floor_page_index_(tx.page);
         const unsigned src = tx.template_src;
         const uint32_t now = millis();
-        const uint32_t age_limit = src == 1 && tx.page != lg_floorstanding::Page::Comfort
+        const uint32_t age_limit = src == 1 && tx.page != lg_floor_console::Page::Comfort
             ? FLOOR_INDOOR_STATIC_MAX_AGE : FLOOR_TEMPLATE_MAX_AGE;
-        if (!floorstanding_template_valid_[p][src] ||
-            uint32_t(now - floorstanding_template_at_[p][src]) > age_limit ||
-            !lg_floorstanding::build(send_buf_, floorstanding_templates_[p][src],
+        if (!floor_console_template_valid_[p][src] ||
+            uint32_t(now - floor_console_template_at_[p][src]) > age_limit ||
+            !lg_floor_console::build(send_buf_, floor_console_templates_[p][src],
                                      tx.page, slave_, tx.target)) {
-            floorstanding_finish_("source frame unavailable or invalid", false);
+            floor_console_finish_("source frame unavailable or invalid", false);
             return;
         }
-        floorstanding_send_queued_ = false;
+        floor_console_send_queued_ = false;
         ++tx.transmissions;
         tx.echo_seen = false;
         tx.readback_queued = false;
@@ -3685,48 +3951,64 @@ private:
         tx.master_matches = 0;
         tx.indoor_matches = 0;
         tx.transmitted_at = now;
+        // Snapshot the precise last command BEFORE send_buf_ is reused by
+        // any subsequent status write or selective-readback request.
+        memcpy(tx.last_wire_write, send_buf_, MsgLen);
+        tx.selective_probe_attempted = false;
+        tx.selective_probe_fallback_ready = false;
+        tx.selective_probe_sent_at = 0;
+        if (slave_ && floor_console_passive_readback_ && tx.page == lg_floor_console::Page::Discharge)
+            ESP_LOGI(TAG, "FLOOR PASSIVE: observing for spontaneous genuine indoor CD "
+                          "for up to %us before any full-refresh fallback; newer HA choices may supersede",
+                     unsigned(FLOOR_PASSIVE_DISCHARGE_WINDOW_MS / 1000u));
         ESP_LOGI(TAG, "FLOOR TX: page %u, value %u, attempt %u/2, %s; template=%s (%us old), acceptance unverified",
                  unsigned(tx.page), unsigned(tx.target), unsigned(tx.transmissions),
                  slave_ ? "Slave" : "Master", src == 0 ? "genuine Master" : "genuine indoor",
-                 unsigned((now - floorstanding_template_at_[p][src]) / 1000u));
+                 unsigned((now - floor_console_template_at_[p][src]) / 1000u));
         ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
         UARTDevice::write_array(send_buf_, MsgLen);
         last_write_millis_ = now;
-        pending_send_ = PendingSendKind::Floorstanding;
+        pending_send_ = PendingSendKind::FloorConsole;
     }
 
-    void floorstanding_observe_write_(MessageSender sender, lg_floorstanding::Page page,
+    void floor_console_observe_write_(MessageSender sender, lg_floor_console::Page page,
                                       const uint8_t *frame) {
-        if (!floorstanding_features_ || sender == MessageSender::Slave ||
-            !lg_floorstanding::recognized_frame(frame, page)) return;
+        if (!floor_console_features_ || sender == MessageSender::Slave ||
+            !lg_floor_console::recognized_frame(frame, page)) return;
         const unsigned p = floor_page_index_(page);
         const unsigned src = sender == MessageSender::Master ? 0 : 1;
         const uint32_t now = millis();
-        const uint8_t observed = lg_floorstanding::value(frame, page);
-        const bool master_had_selection = floorstanding_template_valid_[p][0];
+        const uint8_t observed = lg_floor_console::value(frame, page);
+        const bool master_had_selection = floor_console_template_valid_[p][0];
         const bool new_master_selection = sender == MessageSender::Master &&
             (!master_had_selection ||
-             lg_floorstanding::value(floorstanding_templates_[p][0], page) != observed);
-        memcpy(floorstanding_templates_[p][src], frame, MsgLen);
-        floorstanding_template_at_[p][src] = now;
-        floorstanding_template_valid_[p][src] = true;
+             lg_floor_console::value(floor_console_templates_[p][0], page) != observed);
+        memcpy(floor_console_templates_[p][src], frame, MsgLen);
+        floor_console_template_at_[p][src] = now;
+        floor_console_template_valid_[p][src] = true;
         // A new physical Master selection takes precedence over any deferred
         // HA command for that same page, not just over an active write.
+        if (sender == MessageSender::Master && master_had_selection && new_master_selection &&
+            page == lg_floor_console::Page::Discharge && floor_fast_verify_pending_) {
+            floor_fast_verify_pending_ = false;
+            floor_fast_verify_sent_ = false;
+            ESP_LOGI(TAG, "FLOOR FAST: physical wall-controller change supersedes unverified HA selection");
+        }
         if (sender == MessageSender::Master && new_master_selection &&
-            floorstanding_deferred_.valid && floorstanding_deferred_.page == page) {
-            floorstanding_deferred_ = FloorstandingDeferredRequest{};
+            floor_console_deferred_.valid && floor_console_deferred_.page == page) {
+            floor_console_deferred_ = FloorConsoleDeferredRequest{};
             ESP_LOGI(TAG, "FLOOR TX: dropped deferred HA request; physical Master changed page %u to %u",
                      unsigned(page), unsigned(observed));
         }
-        if (floorstanding_tx_.active && floorstanding_tx_.page == page) {
-            auto &tx = floorstanding_tx_;
+        if (floor_console_tx_.active && floor_console_tx_.page == page) {
+            auto &tx = floor_console_tx_;
             if (sender == MessageSender::Master && master_had_selection &&
                 new_master_selection && observed != tx.target) {
                 // Real wall-control operation wins. Do not fight it with a
                 // stale queued HA request or second 2D attempt.
-                floorstanding_deferred_ = FloorstandingDeferredRequest{};
-                floorstanding_finish_("wall controller changed discharge/comfort setting", false);
-                floorstanding_publish_control_(page, observed);
+                floor_console_deferred_ = FloorConsoleDeferredRequest{};
+                floor_console_finish_("wall controller changed discharge/comfort setting", false);
+                floor_console_publish_control_(page, observed);
                 return;
             }
             if (tx.transmissions > 0 &&
@@ -3744,18 +4026,43 @@ private:
                                  unsigned(page), unsigned(observed), unsigned(tx.target));
                 }
                 if (tx.indoor_matches >= 2) {
-                    floorstanding_finish_("two matching genuine indoor-unit reports", true);
+                    floor_console_finish_("two matching genuine indoor-unit reports", true);
                     return;
                 }
             }
             return;
+        }
+        // Deferred V2.0.4 verification uses the genuine indoor CD frames,
+        // never the local echo or the speculative Type-D 0x80 packet.
+        if (sender == MessageSender::Unit && page == lg_floor_console::Page::Discharge &&
+            floor_fast_verify_pending_) {
+            if (!floor_fast_verify_sent_ || !floor_fast_verify_echo_seen_) {
+                // The requested value remains visibly optimistic until we
+                // deliberately obtain a fresh status. A CD from a previous
+                // in-flight full-settings burst might be stale.
+                return;
+            }
+            const auto outcome = floor_fast_cd_verifier_.observe(observed);
+            if (outcome == lg_floor_console::FastCDResult::Confirmed) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("CONFIRMED: delayed genuine indoor CD matches requested discharge");
+            } else if (outcome == lg_floor_console::FastCDResult::Different) {
+                floor_fast_verify_pending_ = false;
+                floor_fast_verify_sent_ = false;
+                floor_console_report_("REJECTED/OVERRIDDEN: indoor CD differs from requested discharge; UI synchronised");
+            } else {
+                // Keep showing pending request until the second matching CD;
+                // do not momentarily publish a stale intermediate sample.
+                return;
+            }
         }
         // When idle, accept genuine indoor status or a changed value from the
         // wall Master. Repeated unchanged AD must not overwrite a confirmed
         // indoor selection with an older cached Master choice.
         if (sender == MessageSender::Unit ||
             (slave_ && sender == MessageSender::Master && new_master_selection))
-            floorstanding_publish_control_(page, observed);
+            floor_console_publish_control_(page, observed);
     }
 
     static std::string format_frame_(const uint8_t* buffer) {
@@ -3773,7 +4080,7 @@ private:
     }
 
     // Publish only on a newly observed value so debug logs remain readable.
-    void floorstanding_publish_observation_(text_sensor::TextSensor *destination,
+    void floor_console_publish_observation_(text_sensor::TextSensor *destination,
             const char *label, const char *value, const uint8_t *buffer) {
         if (destination == nullptr) return;
         if (!destination->has_state() || destination->get_state() != value) {
@@ -3782,28 +4089,28 @@ private:
         }
     }
 
-    void floorstanding_observe_page_(MessageSender sender, uint8_t page, const uint8_t *buffer) {
-        if (!floorstanding_monitoring_ || sender == MessageSender::Slave) return;
+    void floor_console_observe_page_(MessageSender sender, uint8_t page, const uint8_t *buffer) {
+        if (!floor_console_monitoring_ || sender == MessageSender::Slave) return;
         const bool master = sender == MessageSender::Master;
         if (page == 4) {
-            floorstanding_publish_observation_(master ? floorstanding_comfort_master_ : floorstanding_comfort_indoor_,
+            floor_console_publish_observation_(master ? floor_console_comfort_master_ : floor_console_comfort_indoor_,
                 master ? "Master AC comfort cooling" : "Indoor CC comfort cooling",
-                lg_floorstanding::comfort_cooling(buffer) ? "On" : "Off", buffer);
+                lg_floor_console::comfort_cooling(buffer) ? "On" : "Off", buffer);
         } else if (page == 5) {
-            floorstanding_publish_observation_(master ? floorstanding_direction_master_ : floorstanding_direction_indoor_,
+            floor_console_publish_observation_(master ? floor_console_direction_master_ : floor_console_direction_indoor_,
                 master ? "Master AD discharge direction" : "Indoor CD discharge direction",
-                lg_floorstanding::discharge_name(lg_floorstanding::discharge_code(buffer)), buffer);
+                lg_floor_console::discharge_name(lg_floor_console::discharge_code(buffer)), buffer);
         } else if (page == 6 && buffer[1] == 0x10) {
-            floorstanding_publish_observation_(master ? floorstanding_step_master_ : floorstanding_step_indoor_,
+            floor_console_publish_observation_(master ? floor_console_step_master_ : floor_console_step_indoor_,
                 master ? "Master AE.10 comfort step" : "Indoor CE.10 comfort step",
-                lg_floorstanding::comfort_step_name(lg_floorstanding::comfort_step_code(buffer)), buffer);
+                lg_floor_console::comfort_step_name(lg_floor_console::comfort_step_code(buffer)), buffer);
         }
     }
 
     // Type 5 (0xCD): advanced installer settings, mostly undocumented. Raw only.
     void process_type_d_settings_message(MessageSender sender, const uint8_t* buffer) {
-        floorstanding_observe_page_(sender, 5, buffer);
-        floorstanding_observe_write_(sender, lg_floorstanding::Page::Discharge, buffer);
+        floor_console_observe_page_(sender, 5, buffer);
+        floor_console_observe_write_(sender, lg_floor_console::Page::Discharge, buffer);
         if (sender != MessageSender::Unit) {
             return;
         }
@@ -3853,9 +4160,9 @@ private:
     }
 
     void process_type_e_status_message(MessageSender sender, const uint8_t* buffer) {
-        floorstanding_observe_page_(sender, 6, buffer);
+        floor_console_observe_page_(sender, 6, buffer);
         if (buffer[1] == 0x10)
-            floorstanding_observe_write_(sender, lg_floorstanding::Page::Step, buffer);
+            floor_console_observe_write_(sender, lg_floor_console::Page::Step, buffer);
         if (sender == MessageSender::Unit && buffer[1] != 0x80) {
             process_type_e_settings_message(buffer);
             return;

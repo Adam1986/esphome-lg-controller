@@ -86,9 +86,9 @@ climate:
     fahrenheit: ${fahrenheit}
     is_slave_controller: ${is_slave_controller}
     # Standard 9 units: disable floor-specific controls and reverse mapping.
-    floorstanding_monitoring: false
-    floorstanding_features: false
-    floorstanding_reversed_airflow: false
+    floor_console_monitoring: false
+    floor_console_features: false
+    floor_console_reversed_airflow: false
     temperature_sensor: temp_sensor
 
     vane1:

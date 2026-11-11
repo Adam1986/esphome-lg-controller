@@ -3,7 +3,7 @@
 
 // Pure, read-only interpretations recovered from the PREMTB100 V2.12.3a
 // AC application. These functions NEVER compose or transmit control frames.
-namespace lg_floorstanding {
+namespace lg_floor_console {
 inline bool comfort_cooling(const uint8_t *frame) { return (frame[11] & 0x04) != 0; }
 inline bool supports_comfort_cooling(const uint8_t *c9) { return (c9[11] & 0x20) != 0; }
 inline uint8_t discharge_code(const uint8_t *frame) { return frame[8] & 0x03; }
