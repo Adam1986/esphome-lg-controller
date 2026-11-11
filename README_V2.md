@@ -181,7 +181,10 @@ indoor-unit confirmation rules. **Optional**
 discharge direction only: after the transmitted command echoes, Home Assistant
 shows the *requested but unverified* choice. A coalesced full settings refresh
 checks for two consistent genuine indoor `CD` messages after 45 seconds of
-quiet and when the bus is available. The command-status entity distinguishes
+quiet (default), or after a longer opt-in quiet interval using
+`floor_console_fast_verify_quiet_seconds: 120` for experiments on the Garden
+Office. New user controls reset the quiet clock; an absolute deadline still
+bounds verification. The command-status entity distinguishes
 `SENT (UNVERIFIED)` from a later `CONFIRMED` result.
 
 On 10 November 2026, the Garden Office `ARNU07GQAA4` produced a genuine indoor

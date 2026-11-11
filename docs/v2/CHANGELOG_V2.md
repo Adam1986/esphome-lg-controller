@@ -4,6 +4,21 @@ The sections below record when functionality was developed. Inclusion in the
 repository's `main` branch does **not** mean all model-specific features are
 physically validated; see [testing and limitations](TESTING_AND_LIMITATIONS.md).
 
+## 2026-11-11 — V2.0.5 experimental Floor Console verification scheduling
+
+- Added optional `floor_console_fast_verify_quiet_seconds` (45–180, default
+  **45**) for Slave Floor Consoles with fast discharge enabled. An experimental
+  value of **120** allows more time for consecutive outlet changes before a
+  full `28` settings response temporarily occupies the 100-baud bus.
+- A user-initiated fan/mode/temperature/swing or Floor Console change resets
+  only the *quiet clock*; an independent absolute deadline still prevents
+  indefinite unverified status. Pending normal commands, installer writes,
+  and fan calibration block the optional refresh.
+- No changes to outgoing `2D` frames, 500 ms bus-idle rule, genuine indoor
+  `CD` verification, normal Slave acknowledgements, or sleep guards.
+- **Unverified on hardware** at the time of this patch; test on ARNU07GQAA4
+  before relying on any latency improvements.
+
 ## 2026-11-11 — Documentation consolidation after merge
 
 - Consolidated historical selective page-5 readback experiments into

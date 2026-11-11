@@ -115,6 +115,9 @@ climate:
     # supervised testing. When true, Home Assistant shows the requested
     # direction after UART echo, with genuine CD confirmation deferred.
     floor_console_fast_discharge: false
+    # Optional ONLY when fast discharge is on: wait longer between user
+    # changes and the expensive full readback (45..180s, default 45).
+    # floor_console_fast_verify_quiet_seconds: 120
     # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
     floor_console_reversed_airflow: true

@@ -44,10 +44,17 @@ does not validate other Floor Console models.
 - **Fast discharge (optional):**
   `floor_console_fast_discharge: true` applies only to discharge direction.
   After a confirmed UART echo, Home Assistant shows the **requested but
-  unverified** direction. After 45 seconds without another selection, a
-  guarded, bus-dependent full settings refresh can check the latest target
+  unverified** direction. After 45 seconds without another selection by
+  default (or up to 180 seconds with the optional
+  `floor_console_fast_verify_quiet_seconds`), a guarded, bus-dependent full
+  settings refresh can check the latest target
   using two consistent indoor `CD` reports. Confirmation may take considerably
   longer than 45 seconds.
+- **V2.0.5 scheduling experiment (not yet physically validated):** Longer
+  quiet time and deferral during normal user controls may reduce the risk of
+  a full-settings response blocking the next direction change. This cannot
+  preempt a response that has already started. The absolute verification
+  deadline remains bounded and a longer quiet time delays confirmation.
 - **Inactive experiments:**
   `floor_console_passive_readback: false` and
   `floor_console_selective_cd_probe: false`. Passive 12-second monitoring

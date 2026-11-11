@@ -16,6 +16,26 @@ int main() {
     assert(!fast_verify_due(true, false, false, true, 50000, 45000));
     assert(!fast_verify_due(true, false, false, false, 44999, 45000));
     assert(fast_verify_due(true, false, false, false, 45000, 45000));
+    // Custom 120s quiet time: a fresh fan/mode or direction request moves
+    // the activity clock, but NEVER moves the absolute pending deadline.
+    const uint32_t request_at = 10000u;
+    uint32_t last_activity_at = request_at;
+    assert(!fast_verify_due(true, false, false, false,
+                            fast_elapsed_ms(120000u, last_activity_at), 120000u));
+    last_activity_at = 100000u; // another explicit user control
+    assert(!fast_verify_due(true, false, false, false,
+                            fast_elapsed_ms(160000u, last_activity_at), 120000u));
+    assert(fast_verify_due(true, false, false, false,
+                           fast_elapsed_ms(220000u, last_activity_at), 120000u));
+    // Absolute expiry remains bounded even when normal controls keep arriving.
+    assert(fast_verify_expired(false, fast_elapsed_ms(265000u, request_at),
+                               120000u, 135000u, 90000u));
+    assert(!fast_verify_expired(false, 179999u, 45000u, 135000u, 90000u));
+    assert(fast_verify_expired(false, 180000u, 45000u, 135000u, 90000u));
+    assert(!fast_verify_expired(false, 254999u, 120000u, 135000u, 90000u));
+    assert(fast_verify_expired(false, 255000u, 120000u, 135000u, 90000u));
+    assert(!fast_verify_expired(true, 89999u, 120000u, 135000u, 90000u));
+    assert(fast_verify_expired(true, 90000u, 120000u, 135000u, 90000u));
     FastCDVerifier v;
     v.reset(2); // Bottom
     assert(v.observe(2) == FastCDResult::Waiting);

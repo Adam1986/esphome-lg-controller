@@ -80,5 +80,12 @@ inline bool fast_verify_due(bool pending, bool sent, bool tx_active, bool deferr
                             uint32_t elapsed_quiet, uint32_t quiet_ms) {
     return pending && !sent && !tx_active && !deferred && elapsed_quiet >= quiet_ms;
 }
+// A quiet-clock reset on subsequent user activity must never extend the
+// *absolute* verification deadline. Once sent, use the fixed CD reply timer.
+inline bool fast_verify_expired(bool sent, uint32_t elapsed_absolute,
+                                uint32_t quiet_ms, uint32_t send_allowance_ms,
+                                uint32_t response_timeout_ms) {
+    return elapsed_absolute >= (sent ? response_timeout_ms : quiet_ms + send_allowance_ms);
+}
 
 } // namespace lg_floor_console

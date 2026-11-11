@@ -57,6 +57,7 @@ climate:
     floor_console_passive_readback: false
     floor_console_selective_cd_probe: false
     floor_console_fast_discharge: true  # Experimental, opt-in
+    floor_console_fast_verify_quiet_seconds: 120  # V2.0.5 opt-in, default 45
     floor_console_command_status:
       name: "Floor - Command Status"
       internal: false
@@ -66,6 +67,30 @@ This is an **illustrative fragment**, not a complete ESPHome configuration.
 Keep your own pins, substitutions, Master/Slave setting, and source-template
 configuration. The repository's shared Floor Console example leaves fast
 discharge **off by default**.
+
+## V2.0.5 scheduling experiment — optional longer quiet period
+
+The V2.0.4 default of **45 seconds** is unchanged if the new YAML field is
+omitted. For a supervised ARNU07GQAA4 installation, set
+`floor_console_fast_verify_quiet_seconds: 120` to postpone the *optional*
+full `28` verification until two minutes have elapsed without any further
+user-initiated direction, fan, temperature, mode or swing change.
+
+This improves the chance that several selections spaced 30–90 seconds apart
+can be sent before an expensive full-settings burst starts. The quiet clock
+resets on new user requests, but a **separate absolute deadline** remains:
+by default, 180 seconds after the echo; with a 120-second quiet interval,
+255 seconds after the echo. If no safe readback was possible by then, the
+status becomes `UNVERIFIED` and the requested selection is not treated as
+confirmed. Once a deliberate `28` has been transmitted, the existing 90-second
+reply timeout applies.
+
+The readback is still lower priority than pending climate/installer commands,
+fan calibration and Floor Console writes. **It cannot interrupt a settings
+response that has already started.** This is bus-load avoidance, not a change
+to the 500 ms safety guard or the LG wire protocol. The longer interval is
+an experiment: exact physical outlet timing has not been validated, and the
+Home Assistant selection remains optimistic for longer.
 
 ## Evidence from the 10 November 2026 trial
 

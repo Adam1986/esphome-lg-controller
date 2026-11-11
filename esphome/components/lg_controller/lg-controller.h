@@ -235,12 +235,15 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // V2.0.4: optional fast discharge writes with one delayed, coalesced
     // genuine CD verification. Local echo != acceptance; the UI is optimistic.
     bool floor_console_fast_discharge_ = false;
+    // Opt-in per-device quiet interval, 45..180 seconds; 45s preserves V2.0.4.
+    uint32_t floor_fast_verify_quiet_ms_ = 45000u;
     bool floor_fast_verify_pending_ = false;
     bool floor_fast_verify_sent_ = false;
     bool floor_fast_verify_echo_seen_ = false;
     uint8_t floor_fast_verify_target_ = 0;
     lg_floor_console::FastCDVerifier floor_fast_cd_verifier_;
-    uint32_t floor_fast_verify_queued_at_ = 0;
+    uint32_t floor_fast_verify_queued_at_ = 0; // Absolute start: never reset deadline.
+    uint32_t floor_fast_verify_last_activity_at_ = 0; // Quiet clock: reset by user controls.
     uint32_t floor_fast_verify_sent_at_ = 0;
     sensor::Sensor *filter_time_remaining_ = nullptr;
     sensor::Sensor *filter_remaining_percent_ = nullptr;
@@ -311,9 +314,11 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     static constexpr uint32_t FLOOR_SELECTIVE_CD_TIMEOUT_MS = 10000u;
     // Wait until the user has stopped choosing outlets before flooding the
     // 100-baud bus with a full-settings readback. At most one query per burst.
-    static constexpr uint32_t FLOOR_FAST_QUIET_MS = 45000u;
     static constexpr uint32_t FLOOR_FAST_VERIFY_TIMEOUT_MS = 90000u;
-    static constexpr uint32_t FLOOR_FAST_VERIFY_MAX_PENDING_MS = 180000u;
+    // Preserve V2.0.4's 180s total deadline at the default 45s quiet,
+    // while allowing a longer user-selected quiet interval without expiring
+    // before the request has had a chance to use a safe bus slot.
+    static constexpr uint32_t FLOOR_FAST_VERIFY_SEND_ALLOWANCE_MS = 135000u;
     static constexpr uint32_t FLOOR_READBACK_TIMEOUT_MS = 60000u;
     static constexpr uint32_t FLOOR_READBACK_GUARD_WAIT_MS = 20000u;
     static constexpr uint32_t FLOOR_TX_REPEAT_MS = 65000u;
@@ -835,6 +840,12 @@ public:
     void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
     void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
     void set_floor_console_fast_discharge(bool v) { floor_console_fast_discharge_ = v; }
+    void set_floor_console_fast_verify_quiet_seconds(uint32_t seconds) {
+        // Schema limits to 45..180; clamp defensively for direct callers.
+        if (seconds < 45u) seconds = 45u;
+        if (seconds > 180u) seconds = 180u;
+        floor_fast_verify_quiet_ms_ = seconds * 1000u;
+    }
     void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
@@ -1148,6 +1159,13 @@ public:
 
     // Process changes from HA.
     void control(const climate::ClimateCall &call) override {
+        // Do not begin an optional full-settings refresh shortly after an
+        // explicit fan/mode/temperature/swing change. The absolute fast-CD
+        // verification deadline is separate and stays bounded.
+        if (floor_fast_verify_pending_ && !floor_fast_verify_sent_ &&
+            (call.get_mode().has_value() || call.get_fan_mode().has_value() ||
+             call.get_target_temperature().has_value() || call.get_swing_mode().has_value()))
+            floor_fast_verify_last_activity_at_ = millis();
         if (call.get_mode().has_value()) {
             this->mode = *call.get_mode();
             operation_mode_changed_ = true;
@@ -1443,10 +1461,14 @@ public:
             } else if (floor_console_fast_discharge_ && lg_floor_console::fast_verify_due(
                            floor_fast_verify_pending_, floor_fast_verify_sent_,
                            floor_console_tx_.active, floor_console_deferred_.valid,
-                           lg_floor_console::fast_elapsed_ms(millis_now, floor_fast_verify_queued_at_), FLOOR_FAST_QUIET_MS) &&
+                           lg_floor_console::fast_elapsed_ms(millis_now, floor_fast_verify_last_activity_at_),
+                           floor_fast_verify_quiet_ms_) &&
+                       !floor_console_busy_for_start_() && !slave_fan_cal_readback_queued_ &&
                        !active_reservation_ && !slave_sleep_master_active_ &&
                        !sleep_timer_target_millis_.has_value()) {
-                // Lowest-priority coalesced readback. Skip if we cannot build
+                // Lowest-priority coalesced readback: never outrank pending
+                // climate, fan calibration, installer, or floor commands.
+                // Skip if we cannot build
                 // a known-safe Type-0 settings request from recent A8/C8.
                 send_floor_console_fast_verify_();
             } else if (pending_slave_pipe_discovery_) {
@@ -3679,9 +3701,11 @@ private:
         floor_fast_cd_verifier_.reset(target);
         floor_fast_verify_target_ = target;
         floor_fast_verify_queued_at_ = millis();
+        floor_fast_verify_last_activity_at_ = floor_fast_verify_queued_at_;
         floor_fast_verify_sent_at_ = 0;
         floor_console_publish_control_(lg_floor_console::Page::Discharge, target);
-        floor_console_report_("SENT (UNVERIFIED): discharge command echoed; one coalesced indoor CD readback will follow after 45s quiet");
+        floor_console_report_("SENT (UNVERIFIED): discharge command echoed; delayed CD readback after " +
+                              std::to_string(floor_fast_verify_quiet_ms_ / 1000u) + "s quiet");
     }
 
     void send_floor_console_fast_verify_() {
@@ -3695,7 +3719,8 @@ private:
         floor_fast_verify_sent_ = true;
         floor_fast_verify_echo_seen_ = false;
         floor_fast_verify_sent_at_ = millis();
-        ESP_LOGI(TAG, "FLOOR FAST: one coalesced guarded 28 readback after 45s quiet; awaiting two indoor CD frames");
+        ESP_LOGI(TAG, "FLOOR FAST: one coalesced guarded 28 readback after %us quiet; awaiting two indoor CD frames",
+                 unsigned(floor_fast_verify_quiet_ms_ / 1000u));
         ESP_LOGD(TAG, "sending %s", format_frame_(send_buf_).c_str());
         UARTDevice::write_array(send_buf_, MsgLen);
         last_write_millis_ = millis();
@@ -3707,6 +3732,8 @@ private:
     void floor_console_request_(lg_floor_console::Page page, uint8_t requested) {
         if (!floor_console_features_ || !lg_floor_console::valid_value(page, requested)) return;
         const uint32_t now = millis();
+        if (floor_fast_verify_pending_ && !floor_fast_verify_sent_)
+            floor_fast_verify_last_activity_at_ = now;
         if (floor_console_tx_.active || floor_console_busy_for_start_() ||
             floor_console_deferred_.valid) {
             if (floor_console_tx_.active && floor_console_tx_.page == page &&
@@ -3735,8 +3762,9 @@ private:
             const uint32_t elapsed = floor_fast_verify_sent_
                 ? lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_sent_at_)
                 : lg_floor_console::fast_elapsed_ms(now, floor_fast_verify_queued_at_);
-            if ((floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_TIMEOUT_MS) ||
-                (!floor_fast_verify_sent_ && elapsed >= FLOOR_FAST_VERIFY_MAX_PENDING_MS)) {
+            if (lg_floor_console::fast_verify_expired(
+                    floor_fast_verify_sent_, elapsed, floor_fast_verify_quiet_ms_,
+                    FLOOR_FAST_VERIFY_SEND_ALLOWANCE_MS, FLOOR_FAST_VERIFY_TIMEOUT_MS)) {
                 floor_fast_verify_pending_ = false;
                 floor_fast_verify_sent_ = false;
                 floor_console_report_("UNVERIFIED: no timely genuine indoor CD; optimistic discharge selection may be stale");
