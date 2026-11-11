@@ -235,6 +235,11 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     // V2.0.4: optional fast discharge writes with one delayed, coalesced
     // genuine CD verification. Local echo != acceptance; the UI is optimistic.
     bool floor_console_fast_discharge_ = false;
+    // V2.0.6: experimental optimistic HA selection BEFORE safe-bus TX.
+    // Only effective for Slave + fast discharge, never normal climate controls.
+    bool floor_console_optimistic_discharge_ = false;
+    bool floor_console_optimistic_discharge_pending_ = false;
+    uint8_t floor_console_optimistic_discharge_target_ = 0;
     // Opt-in per-device quiet interval, 45..180 seconds; 45s preserves V2.0.4.
     uint32_t floor_fast_verify_quiet_ms_ = 45000u;
     bool floor_fast_verify_pending_ = false;
@@ -840,6 +845,7 @@ public:
     void set_floor_console_reversed_airflow(bool v) { floor_console_reversed_airflow_ = v; }
     void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
     void set_floor_console_fast_discharge(bool v) { floor_console_fast_discharge_ = v; }
+    void set_floor_console_optimistic_discharge(bool v) { floor_console_optimistic_discharge_ = v; }
     void set_floor_console_fast_verify_quiet_seconds(uint32_t seconds) {
         // Schema limits to 45..180; clamp defensively for direct callers.
         if (seconds < 45u) seconds = 45u;
@@ -3683,8 +3689,21 @@ private:
         floor_console_report_(std::string(success ? "CONFIRMED: " : "UNVERIFIED: ") + why +
                               " (page " + std::to_string(static_cast<unsigned>(page)) +
                               ", " + std::to_string(repeats) + " TX)");
-        if (success) floor_console_publish_control_(page, target);
-        else floor_console_restore_observed_(page);
+        if (success) {
+            if (page == lg_floor_console::Page::Discharge && floor_console_optimistic_discharge_pending_ &&
+                floor_console_optimistic_discharge_target_ == target)
+                floor_console_optimistic_discharge_pending_ = false;
+            floor_console_publish_control_(page, target);
+        } else if (page == lg_floor_console::Page::Discharge &&
+                   floor_console_optimistic_discharge_pending_ &&
+                   floor_console_optimistic_discharge_target_ == target) {
+            floor_console_optimistic_discharge_pending_ = false;
+            // After a write attempt the indoor unit *might* have moved.
+            // Never replace an unverified command with an old cached CD.
+            if (repeats == 0) floor_console_restore_observed_(page);
+        } else {
+            floor_console_restore_observed_(page);
+        }
     }
 
     // After a verified local echo, release the bus and let further discharge
@@ -3734,6 +3753,26 @@ private:
         const uint32_t now = millis();
         if (floor_fast_verify_pending_ && !floor_fast_verify_sent_)
             floor_fast_verify_last_activity_at_ = now;
+        if (page == lg_floor_console::Page::Discharge &&
+            floor_console_optimistic_discharge_ && floor_console_fast_discharge_ && slave_) {
+            // This is a requested value, NOT proof of an indoor update. Publish
+            // before arbitration/queueing so the HA dropdown responds now.
+            floor_console_optimistic_discharge_pending_ = true;
+            floor_console_optimistic_discharge_target_ = requested;
+            floor_console_publish_control_(page, requested);
+            // A newer request supersedes any old delayed CD verification.
+            // We must not let a previous readback overwrite the newest choice.
+            floor_fast_verify_pending_ = false;
+            floor_fast_verify_sent_ = false;
+        } else if (page != lg_floor_console::Page::Discharge &&
+                   floor_console_deferred_.valid &&
+                   floor_console_deferred_.page == lg_floor_console::Page::Discharge &&
+                   floor_console_optimistic_discharge_pending_) {
+            // Another page takes the single deferred slot; do not leave a
+            // discharge request visually pending when it can no longer run.
+            floor_console_optimistic_discharge_pending_ = false;
+            floor_console_restore_observed_(lg_floor_console::Page::Discharge);
+        }
         if (floor_console_tx_.active || floor_console_busy_for_start_() ||
             floor_console_deferred_.valid) {
             if (floor_console_tx_.active && floor_console_tx_.page == page &&
@@ -3767,6 +3806,7 @@ private:
                     FLOOR_FAST_VERIFY_SEND_ALLOWANCE_MS, FLOOR_FAST_VERIFY_TIMEOUT_MS)) {
                 floor_fast_verify_pending_ = false;
                 floor_fast_verify_sent_ = false;
+                floor_console_optimistic_discharge_pending_ = false;
                 floor_console_report_("UNVERIFIED: no timely genuine indoor CD; optimistic discharge selection may be stale");
                 // Do not restore a potentially stale pre-command CD as the
                 // new physical state. Next genuine CD will resynchronise HA.
@@ -3854,6 +3894,10 @@ private:
                 const auto page = floor_console_deferred_.page;
                 floor_console_deferred_ = FloorConsoleDeferredRequest{};
                 floor_console_report_("DEFERRED EXPIRED: LG bus unavailable; no packet sent");
+                if (page == lg_floor_console::Page::Discharge &&
+                    floor_console_optimistic_discharge_pending_) {
+                    floor_console_optimistic_discharge_pending_ = false;
+                }
                 floor_console_restore_observed_(page);
             } else if (!floor_console_busy_for_start_() &&
                        uint32_t(now - floor_console_last_finish_at_) >= 1500u) {
@@ -3864,8 +3908,9 @@ private:
         }
     }
 
-    // Read-before-write recovery. The requesting select/switch stays at its
-    // last observed value until two matching indoor page reports confirm it.
+    // Read-before-write recovery. Strict controls remain on their last
+    // observed value until indoor confirmation. V2.0.6 opt-in fast discharge
+    // can show the user-requested direction while its write is still queued.
     // Never fabricate a Type-5/6 page or turn a read query into a settings write.
     void send_floor_console_template_refresh_() {
         auto &tx = floor_console_tx_;
@@ -4014,6 +4059,14 @@ private:
         memcpy(floor_console_templates_[p][src], frame, MsgLen);
         floor_console_template_at_[p][src] = now;
         floor_console_template_valid_[p][src] = true;
+        // A deliberate physical wall-controller change overrides an optimistic
+        // HA selection, even when the HA request was still queued for the bus.
+        if (sender == MessageSender::Master && master_had_selection && new_master_selection &&
+            page == lg_floor_console::Page::Discharge &&
+            floor_console_optimistic_discharge_pending_) {
+            floor_console_optimistic_discharge_pending_ = false;
+            floor_console_report_("OVERRIDDEN: physical wall controller changed discharge selection");
+        }
         // A new physical Master selection takes precedence over any deferred
         // HA command for that same page, not just over an active write.
         if (sender == MessageSender::Master && master_had_selection && new_master_selection &&
@@ -4027,6 +4080,15 @@ private:
             floor_console_deferred_ = FloorConsoleDeferredRequest{};
             ESP_LOGI(TAG, "FLOOR TX: dropped deferred HA request; physical Master changed page %u to %u",
                      unsigned(page), unsigned(observed));
+        }
+        if (page == lg_floor_console::Page::Discharge && sender == MessageSender::Unit &&
+            lg_floor_console::suppress_unverified_discharge_cd(
+                floor_console_optimistic_discharge_pending_, floor_fast_verify_pending_,
+                floor_fast_verify_sent_, floor_fast_verify_echo_seen_)) {
+            // We still cache genuine CD as a future packet template, but an
+            // unsolicited or older in-flight CD must not overwrite the latest
+            // HA request before its own fresh readback has started.
+            return;
         }
         if (floor_console_tx_.active && floor_console_tx_.page == page) {
             auto &tx = floor_console_tx_;
@@ -4070,18 +4132,21 @@ private:
                 // in-flight full-settings burst might be stale.
                 return;
             }
-            const auto outcome = floor_fast_cd_verifier_.observe(observed);
+            const auto outcome = floor_fast_cd_verifier_.observe(
+                observed, floor_console_optimistic_discharge_ && slave_);
             if (outcome == lg_floor_console::FastCDResult::Confirmed) {
                 floor_fast_verify_pending_ = false;
                 floor_fast_verify_sent_ = false;
-                floor_console_report_("CONFIRMED: delayed genuine indoor CD matches requested discharge");
+                floor_console_optimistic_discharge_pending_ = false;
+                floor_console_report_("CONFIRMED: fresh genuine indoor CD matches requested discharge");
             } else if (outcome == lg_floor_console::FastCDResult::Different) {
                 floor_fast_verify_pending_ = false;
                 floor_fast_verify_sent_ = false;
-                floor_console_report_("REJECTED/OVERRIDDEN: indoor CD differs from requested discharge; UI synchronised");
+                floor_console_optimistic_discharge_pending_ = false;
+                floor_console_report_("REJECTED/OVERRIDDEN: two indoor CD reports differ from requested discharge; UI synchronised");
             } else {
-                // Keep showing pending request until the second matching CD;
-                // do not momentarily publish a stale intermediate sample.
+                // Keep showing requested value until a fresh matching CD (one
+                // if opted in, otherwise two) or two consistent mismatches.
                 return;
             }
         }

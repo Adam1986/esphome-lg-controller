@@ -36,6 +36,14 @@ int main() {
     assert(fast_verify_expired(false, 255000u, 120000u, 135000u, 90000u));
     assert(!fast_verify_expired(true, 89999u, 120000u, 135000u, 90000u));
     assert(fast_verify_expired(true, 90000u, 120000u, 135000u, 90000u));
+    // An old CD must never overwrite a new HA selection during queueing,
+    // transmission or before the new guarded readback echo. Only subsequent
+    // genuine indoor frames can resolve the current request.
+    assert(suppress_unverified_discharge_cd(true, false, false, false));
+    assert(suppress_unverified_discharge_cd(true, true, false, false));
+    assert(suppress_unverified_discharge_cd(true, true, true, false));
+    assert(!suppress_unverified_discharge_cd(true, true, true, true));
+    assert(!suppress_unverified_discharge_cd(false, false, false, false));
     FastCDVerifier v;
     v.reset(2); // Bottom
     assert(v.observe(2) == FastCDResult::Waiting);
@@ -44,6 +52,16 @@ int main() {
     assert(v.observe(2) == FastCDResult::Waiting);
     assert(v.observe(0) == FastCDResult::Waiting); // different mismatch resets
     assert(v.observe(0) == FastCDResult::Different);
+    // V2.0.6: optional single-CD confirmation only for a *fresh matching*
+    // indoor frame. Mismatch still requires two identical, consistent frames.
+    v.reset(2);
+    assert(v.observe(2, true) == FastCDResult::Confirmed);
+    v.reset(1);
+    assert(v.observe(2, true) == FastCDResult::Waiting);
+    assert(v.observe(2, true) == FastCDResult::Different);
+    v.reset(0);
+    assert(v.observe(1, true) == FastCDResult::Waiting);
+    assert(v.observe(0, true) == FastCDResult::Confirmed);
     v.reset(0); // Both
     assert(v.observe(1) == FastCDResult::Waiting);
     assert(v.observe(0) == FastCDResult::Waiting);

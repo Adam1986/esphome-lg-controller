@@ -37,8 +37,9 @@ inline bool frame_is_newer(uint32_t first_at, uint32_t second_at) {
     return int32_t(first_at - second_at) >= 0; // rollover-safe for <2^31 ms
 }
 
-// V2.0.4: two genuinely matching CD reports are required to call an
-// optimistically displayed direction confirmed (or overridden).
+// V2.0.6: optionally accept a single *fresh matching* genuine indoor CD.
+// Keep two consistent mismatches before declaring a rejection/override.
+// Callers must enforce post-readback freshness, source and UART-echo checks.
 enum class FastCDResult : uint8_t { Waiting, Confirmed, Different };
 struct FastCDVerifier {
     uint8_t target = 0;
@@ -51,12 +52,13 @@ struct FastCDVerifier {
         matching = differing = 0;
         last_different = 0xFF;
     }
-    FastCDResult observe(uint8_t actual) {
+    FastCDResult observe(uint8_t actual, bool allow_single_matching_cd = false) {
         if (actual == target) {
             differing = 0;
             last_different = 0xFF;
             if (matching < 2) ++matching;
-            return matching >= 2 ? FastCDResult::Confirmed : FastCDResult::Waiting;
+            return (allow_single_matching_cd || matching >= 2)
+                ? FastCDResult::Confirmed : FastCDResult::Waiting;
         }
         matching = 0;
         if (last_different != actual) {
@@ -67,6 +69,17 @@ struct FastCDVerifier {
         return differing >= 2 ? FastCDResult::Different : FastCDResult::Waiting;
     }
 };
+// A recent request must not be overwritten by an unsolicited (or a stale
+// already-in-flight) indoor CD. Only a genuine post-query CD after the readback
+// echo may resolve the current optimistic request.
+inline bool suppress_unverified_discharge_cd(bool optimistic_request_pending,
+                                             bool verification_pending,
+                                             bool verification_sent,
+                                             bool verification_echo_seen) {
+    return optimistic_request_pending &&
+           !(verification_pending && verification_sent && verification_echo_seen);
+}
+
 // The loop snapshots its clock *before* handling UART RX. An echo handler may
 // start a verification timer slightly later in the same iteration; unsigned
 // subtraction would otherwise underflow and look ~49 days old.

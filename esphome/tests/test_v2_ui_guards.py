@@ -91,8 +91,24 @@ int main() {
     direction.apply_user_request("Bottom");
     assert(requests == 1 && last_request == "Bottom");
     assert(direction.state == "Both" && direction.publishes == 1);
-    direction.publish_state("Bottom");  // two matching indoor CD reports
+    direction.publish_state("Bottom");  // strict mode's indoor confirmation
     assert(direction.state == "Bottom" && direction.publishes == 2);
+
+    // Experimental optimistic discharge: the component's request handler
+    // publishes the requested option at queue time; it does not need to
+    // modify LgSelect behaviour for ANY other select entity.
+    LgSelect fast_direction;
+    fast_direction.publish_state("Both");
+    int fast_requests = 0;
+    fast_direction.set_request_handler([&](const std::string &v) {
+        ++fast_requests;
+        fast_direction.publish_state(v); // component's opt-in behaviour
+    });
+    fast_direction.apply_user_request("Bottom");
+    assert(fast_requests == 1);
+    assert(fast_direction.state == "Bottom" && fast_direction.publishes == 2);
+    fast_direction.apply_user_request("Top");
+    assert(fast_requests == 2 && fast_direction.state == "Top");
 
     LgSwitch comfort;
     comfort.publish_state(false);

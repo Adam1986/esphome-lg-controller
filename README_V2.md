@@ -187,6 +187,18 @@ Office. New user controls reset the quiet clock; an absolute deadline still
 bounds verification. The command-status entity distinguishes
 `SENT (UNVERIFIED)` from a later `CONFIRMED` result.
 
+**V2.0.6 experiment (opt-in):** On a Slave Floor Console with fast discharge
+already enabled, `floor_console_optimistic_discharge: true` makes the existing
+Top/Both/Bottom dropdown show a new choice **as soon as the user requests it**,
+including while the command is safely queued. It is a requested value, **not**
+an indoor acknowledgement. A genuinely fresh matching indoor `CD` after the
+scheduled readback confirms it on the first sample; rejection still requires
+two consistent mismatching samples. Existing optimistic display is retained
+on an unverified timeout, with a diagnostic log; a subsequent genuine indoor
+`CD` may resynchronise it. Physical Master changes take priority. This does
+not speed up the actual LG bus or alter normal climate/sleep controls. Default
+is `false`, and it requires Slave, fast discharge and Floor Console features.
+
 On 10 November 2026, the Garden Office `ARNU07GQAA4` produced a genuine indoor
 `CD` confirmation of Bottom after the delayed refresh. This is **not** proof
 of instant physical outlet movement or of reliable behaviour across every

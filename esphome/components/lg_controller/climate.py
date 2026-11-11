@@ -77,6 +77,7 @@ CONF_FLOOR_CONSOLE_REVERSED_AIRFLOW = "floor_console_reversed_airflow"
 CONF_FLOOR_CONSOLE_PASSIVE_READBACK = "floor_console_passive_readback"
 CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE = "floor_console_selective_cd_probe"
 CONF_FLOOR_CONSOLE_FAST_DISCHARGE = "floor_console_fast_discharge"
+CONF_FLOOR_CONSOLE_OPTIMISTIC_DISCHARGE = "floor_console_optimistic_discharge"
 CONF_FLOOR_CONSOLE_FAST_VERIFY_QUIET_SECONDS = "floor_console_fast_verify_quiet_seconds"
 # EXPERIMENTAL: actively read full diagnostics while genuine Master sleep is active.
 # Only affects Slave Type-B startup discovery; never touches normal climate/sleep writes.
@@ -278,6 +279,9 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
         # discharge write. Type-D selective reads are NOT documented/verified.
         cv.Optional(CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE, default=False): cv.boolean,
         cv.Optional(CONF_FLOOR_CONSOLE_FAST_DISCHARGE, default=False): cv.boolean,
+        # V2.0.6: opt-in immediate HA dropdown state for requested direction;
+        # only used for Slave fast discharge, not other floor/normal controls.
+        cv.Optional(CONF_FLOOR_CONSOLE_OPTIMISTIC_DISCHARGE, default=False): cv.boolean,
         # V2.0.5: postpone full settings readback during bursts of control
         # changes. 45s preserves previous fast-mode behaviour; 120s is an
         # optional Garden Office experiment, never enabled by default.
@@ -465,6 +469,12 @@ async def to_code(config):
     cg.add(var.set_floor_console_passive_readback(config[CONF_FLOOR_CONSOLE_PASSIVE_READBACK]))
     cg.add(var.set_floor_console_selective_cd_probe(config[CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE]))
     cg.add(var.set_floor_console_fast_discharge(config[CONF_FLOOR_CONSOLE_FAST_DISCHARGE]))
+    if config[CONF_FLOOR_CONSOLE_OPTIMISTIC_DISCHARGE] and not (
+        config[CONF_FLOOR_CONSOLE_FEATURES] and config[CONF_IS_SLAVE_CONTROLLER]
+        and config[CONF_FLOOR_CONSOLE_FAST_DISCHARGE]
+    ):
+        raise cv.Invalid("floor_console_optimistic_discharge requires Floor Console features, Slave mode and fast discharge")
+    cg.add(var.set_floor_console_optimistic_discharge(config[CONF_FLOOR_CONSOLE_OPTIMISTIC_DISCHARGE]))
     cg.add(var.set_floor_console_fast_verify_quiet_seconds(config[CONF_FLOOR_CONSOLE_FAST_VERIFY_QUIET_SECONDS]))
     cg.add(var.set_slave_sleep_safe_discovery(config[CONF_SLAVE_SLEEP_SAFE_DISCOVERY]))
     if CONF_FILTER_TIME_REMAINING in config:

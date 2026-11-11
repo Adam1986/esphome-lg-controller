@@ -115,6 +115,11 @@ climate:
     # supervised testing. When true, Home Assistant shows the requested
     # direction after UART echo, with genuine CD confirmation deferred.
     floor_console_fast_discharge: false
+    # V2.0.6 experiment (Slave + fast discharge only): show the selected
+    # Top/Both/Bottom value in Home Assistant as soon as it is requested.
+    # Verification still happens later from genuine indoor CD; leave OFF by
+    # default until physical testing on the ARNU07GQAA4 is complete.
+    # floor_console_optimistic_discharge: true
     # Optional ONLY when fast discharge is on: wait longer between user
     # changes and the expensive full readback (45..180s, default 45).
     # floor_console_fast_verify_quiet_seconds: 120

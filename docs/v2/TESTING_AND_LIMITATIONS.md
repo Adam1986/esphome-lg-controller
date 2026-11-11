@@ -55,6 +55,14 @@ does not validate other Floor Console models.
   a full-settings response blocking the next direction change. This cannot
   preempt a response that has already started. The absolute verification
   deadline remains bounded and a longer quiet time delays confirmation.
+- **V2.0.6 optimistic HA request experiment (not yet physically validated):**
+  `floor_console_optimistic_discharge: true` requires Slave + fast discharge.
+  The dropdown changes to the requested direction at queue time, *before*
+  transmission. A single genuine matching indoor `CD` from the ensuing
+  verified readback is sufficient to confirm; two consistent mismatches are
+  needed to reject. This is an intentionally optimistic UI, not evidence that
+  the physical outlets have moved. On readback timeout it may continue to
+  display the last requested state until a future genuine report arrives.
 - **Inactive experiments:**
   `floor_console_passive_readback: false` and
   `floor_console_selective_cd_probe: false`. Passive 12-second monitoring

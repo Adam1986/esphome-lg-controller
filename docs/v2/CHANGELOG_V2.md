@@ -4,6 +4,22 @@ The sections below record when functionality was developed. Inclusion in the
 repository's `main` branch does **not** mean all model-specific features are
 physically validated; see [testing and limitations](TESTING_AND_LIMITATIONS.md).
 
+## 2026-11-11 — V2.0.6 experimental optimistic discharge display
+
+- Added opt-in `floor_console_optimistic_discharge` for Slave fast-discharge
+  installations (default `false`). Home Assistant now reflects a new
+  Top/Both/Bottom request immediately, even while the real `2D` write awaits a
+  safe bus slot. The UI is **requested/unverified** until a real indoor report.
+- Accept a single fresh matching indoor `CD` after the guarded readback echo,
+  while requiring two consistent mismatches before declaring rejection. Old
+  or unsolicited `CD` must not replace a newer pending selection.
+- Aborted/unsent commands restore the latest observed setting if available;
+  unverified transmitted commands remain visibly requested pending a future
+  genuine observation, with the existing diagnostic warning. Physical Master
+  overrides still take precedence.
+- No changes to normal Master/Slave fan, temperature, sleep or bus arbitration;
+  requires physical testing before merging to `main`.
+
 ## 2026-11-11 — V2.0.5 experimental Floor Console verification scheduling
 
 - Added optional `floor_console_fast_verify_quiet_seconds` (45–180, default
