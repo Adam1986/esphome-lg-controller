@@ -6,13 +6,13 @@ This fork incorporates an enhanced [`lg_controller`](esphome/components/lg_contr
 
 The component is based on the original work of [JanM321](https://github.com/JanM321/esphome-lg-controller) and builds upon enhancements explored in [balazsborbely's fork](https://github.com/balazsborbely/esphome-lg-controller). Development and protocol analysis were predominantly AI-assisted, with real hardware captures and testing provided by the maintainer of this fork.
 
-**Validation:** V2.0.0 was deployed successfully across the maintainer's LG installation on 9 November 2026. Both the standard Slave and Floor Console examples compiled successfully with ESPHome **2026.10.2** during 9–10 November 2026; 19 standalone C++ regression tests and Python/UI tests passed. This is **not an official upstream release** and some advanced/model-specific functions remain unverified.
+**Validation:** The V2.0.0 baseline was deployed on the maintainer's LG installation on 9 November 2026, and standard and Floor Console examples compiled with ESPHome **2026.10.2** during 9–10 November 2026. Subsequent Floor Console development reached **22 passing offline C++ regression programs** plus Python checks. The V2.0.4 fast-discharge timing fix was tested on real hardware on 10 November, including a delayed genuine indoor `CD` confirmation. These results are not a complete validation of every feature or model, and this is **not an official upstream release**.
 
 > **Floor Console compatibility notice — LG ARNU07GQAA4:** The additional Floor Console controls are **still undergoing on-device testing**. Early tests show that discharge-direction commands (Top / Bottom / Both) can be transmitted and subsequently confirmed by indoor-unit `CD` messages, but reliability, timing, and behaviour across operating conditions are not yet fully established. **Some functions may not work as expected** until further testing and confirmation. These experimental controls should not be treated as production-validated.
 
-Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
+Read the [V2 overview](README_V2.md), [testing status](docs/v2/TESTING_AND_LIMITATIONS.md), [Floor Console fast-discharge guide](docs/v2/FLOOR_FAST_DISCHARGE_V204.md), [protocol research](docs/v2/PROTOCOL_NOTES.md), and [sleep reservation notes](docs/v2/SLEEP_RESERVATIONS.md).
 
-### What V2.0.0 improves
+### What the V2 fork improves
 
 - **PREMTB100 Master / ESP32 Slave reliability:** better startup synchronisation, preservation of Master settings, command confirmation, retry handling and external-change arbitration.
 - **100-baud communication:** the supplied V2 configurations use 100 bps following LG driver-timing research and successful testing. This is a tested finding, **not a claim that every LG controller requires 100 baud**.
@@ -106,7 +106,7 @@ Other models have not been validated for these additional controls. If in doubt,
 ### Using the published GitHub component
 
 The supplied configurations use a local `components/` directory.
-Once V2 is published on the fork's `main` branch, you can instead
+With the V2 work merged into this fork's `main` branch, you can
 load the component directly from GitHub by replacing the
 `external_components` section in your selected base YAML:
 

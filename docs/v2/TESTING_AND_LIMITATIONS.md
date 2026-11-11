@@ -1,72 +1,95 @@
-# V2.0.0 testing and limitations
+# V2 testing status and limitations
 
-## Confirmed as of 9 November 2026
+**Last updated: 11 November 2026.** This is a hardware-tested community fork,
+not an official LG or upstream release. Passing offline tests, an ESPHome
+compile and a successful UART echo each establish different things; none
+alone proves every advanced setting was accepted by an indoor unit.
 
-- **Physical operation:** The maintainer reports that V2.0.0 was flashed to the installation's ESP32 controllers promptly after being built and ran successfully throughout the day. Actual on-device use included core power, target temperature, operating mode, and fan controls alongside physical PREMTB100 Masters. This is a user-reported deployment result, not independent certification of all features on all indoor models.
-- **Standalone regression tests:** 19/19 C++17 test programs passed with the enhanced V2 implementation integrated into `esphome/components/lg_controller`. Python syntax and the mocked UI-guard test passed.
-- **ESPHome configuration and compile:** `esphome config esphome/lg-example-standard.yaml` and `esphome compile esphome/lg-example-standard.yaml` passed using ESPHome **2026.10.2** in Codespaces. Flash usage was **864,960 / 1,835,008 bytes (47.1%)**. The build used locally generated test credentials and did not upload to any real device.
-- **Floor Console compilation:** Successfully compiled with ESPHome 2026.10.2. Flash usage was 866,368 / 1,835,008 bytes (47.2%).
-- **Component naming:** Active component is now `lg_controller`, matching the original upstream integration path. No separate development component directory is required.
+## Established baseline
 
-## Pending Floor Console naming refactor
+- **Physical operation (9 November 2026):** The maintainer reported
+  successful V2.0.0 operation across an LG installation using physical
+  PREMTB100 Masters and ESP32 Slaves, including power, operating mode, fan
+  and target-temperature changes. This is field experience, not a general
+  certification for other combinations.
+- **ESPHome 2026.10.2 compilation (9–10 November 2026):** Standard Slave and
+  Floor Console examples compiled successfully in Codespaces. Recorded flash
+  usage was approximately 47.1% and 47.2% respectively. These were build
+  results, not a claim that every later merged commit was independently
+  recompiled.
+- **Offline regression checks:** The initial integrated V2.0.0 baseline
+  passed 19 C++ test programs; the later V2.0.4 fast-discharge/timing-fix
+  work passed **22 C++ regression programs** and the Python syntax/UI checks.
+  Run `bash scripts/run-v2-offline-tests.sh` against the current checkout.
+- **Component naming:** The public implementation remains
+  `esphome/components/lg_controller/`. New Floor Console YAML uses
+  `floor_console_*`; legacy `floorstanding_*` keys are aliases and must not
+  be mixed with their canonical equivalents.
 
-A post-V2.0.0 naming-only refactor changes internal helpers and the canonical
-YAML keys to `floor_console_*`, retaining `floorstanding_*` as compatibility
-aliases. The 19 existing C++ regression programs and additional Python alias
-checks pass offline. A full ESPHome configuration validation and compilation
-of both examples in Codespaces is required before merging this change.
+## LG ARNU07GQAA4 Floor Console — experimental support
 
-## LG ARNU07GQAA4 Floor Console — testing in progress (11 November 2026)
+**Physical testing is continuing. Functions may fail to apply, respond slowly
+or work differently from expected behaviour.** The result on this one model
+does not validate other Floor Console models.
 
-- **Status:** experimental; the Floor Console controls are **not yet fully validated** on model `ARNU07GQAA4`. Functions may behave unexpectedly, fail to apply, or take longer than ordinary fan-speed/temperature changes. Other LG Floor Console models are not validated by this result.
-- **Observed:** on-device trials in ESP32 Slave mode with a genuine LG wall Master have shown normal `2D` commands for Top / Both / Bottom and later matching genuine indoor `CD` reports for a discharge-direction selection. The latest fast-discharge test confirmed Bottom after a delayed full-settings readback. This does not prove the physical outlet responds instantly, or that every selection succeeds under all conditions.
-- **Fast-discharge option:** `floor_console_fast_discharge` is experimental and opt-in. After a UART echo, Home Assistant may show the **requested, unverified** direction; one later guarded `28` settings refresh checks for two consistent indoor `CD` reports. The command-status diagnostic distinguishes `SENT (UNVERIFIED)` from `CONFIRMED` and other outcomes.
-- **Unsuccessful earlier experiments:** spontaneous passive `CD` readback and the unverified `2D.80` selective-read candidate did not yield timely confirmations on the tested unit. Keep `floor_console_passive_readback: false` and `floor_console_selective_cd_probe: false`; the `2D.80` candidate is not proven read-only.
-- **Still to confirm:** repeated physical outlet response times, rapid successive selections, external changes from the wall controller, interactions with power/mode/fan, Comfort Cooling and Comfort Cooling Step, sleep reservation behaviour, startup recovery, and long-term stability.
-- **Use:** supervise initial testing; retain the genuine wall controller as Master and do not rely on unconfirmed console-specific behaviour for unattended operation.
+- **Observed (10 November 2026):** A Slave ESP32 transmitted normal `2D`
+  settings commands for Top / Both / Bottom. A delayed guarded `28` full
+  settings refresh later returned two matching genuine indoor `CD` reports
+  confirming **Bottom**. Home Assistant displayed requested directions after
+  UART echo in fast mode. Exact physical outlet response latency was **not**
+  established from logs.
+- **Strict mode:** Commands use genuine-source settings templates and
+  confirm through indoor readback. Missing or stale templates may require a
+  safe full-settings refresh first.
+- **Fast discharge (optional):**
+  `floor_console_fast_discharge: true` applies only to discharge direction.
+  After a confirmed UART echo, Home Assistant shows the **requested but
+  unverified** direction. After 45 seconds without another selection, a
+  guarded, bus-dependent full settings refresh can check the latest target
+  using two consistent indoor `CD` reports. Confirmation may take considerably
+  longer than 45 seconds.
+- **Inactive experiments:**
+  `floor_console_passive_readback: false` and
+  `floor_console_selective_cd_probe: false`. Passive 12-second monitoring
+  and the unverified `2D.80` candidate did **not** deliver timely `CD` on
+  this installation; `2D.80` has **not** been proven read-only.
+- **Outstanding hardware checks:** Repeated physical Top/Bottom/Both outlet
+  response timings, rapid changes, wall-controller overrides, power/mode/fan
+  interactions, Comfort Cooling, Comfort Cooling Step, startup/reboot, sleep
+  reservation interactions and long-term operation.
 
-## Known limits and areas for additional testing
+Leave the physical wall controller as Master for this arrangement; do not
+rely on experimental console-specific controls for unattended operation.
+See [Floor Console fast discharge](FLOOR_FAST_DISCHARGE_V204.md) and
+[the historical investigation](research/FLOOR_CONSOLE_INVESTIGATION.md).
 
-- Both standard and floor console examples compile successfully. Model-specific floor console functionality still requires further hardware validation.
-- **480-minute sleep reservation:** supported by the V2 Home Assistant input, but full set/readback/expiry remains to be physically confirmed. The Master countdown was observed at 420 minutes in earlier tests.
-- Master-originated sleep edits, zero cancellation, mode changes, reboots and expiry should be tested across operating states and indoor models.
-- Sleep-safe diagnostic polling, installer options, Auto Dry, advanced vane controls and Jet/Power Heating are model-dependent or experimental.
-- The 100-baud setting is tested on this installation, not proven universal across all LG controller generations.
-- Some energy, power, temperature and other advanced readings may remain unavailable or static on particular models.
-- Check per-device pin assignments, chip revision and network exposure. The supplied base configs include an HTTP web server that should be reviewed for security.
+## Other limitations
 
-## Development history
+- The Home Assistant sleep reservation input allows 0–480 minutes.
+  Complete eight-hour set/readback/expiry operation is **not** fully
+  confirmed; an earlier capture observed a genuine Master countdown at
+  420 minutes. Model- and controller-specific cancellation behaviour may
+  differ. See [sleep reservations](SLEEP_RESERVATIONS.md).
+- Master-originated sleep edits, mode changes, reboots, zero cancellation
+  and expiry need further cross-model testing.
+- Installer functions, Auto Dry, vane controls, Jet/Power Heating and
+  diagnostic polling are model-dependent and not all physically verified.
+- The 100-baud example setting was tested on this installation, but is not
+  established for every LG controller generation.
+- Energy and power readings may be unavailable, static or misleading on
+  particular units.
+- Check pin assignments, ESP32 revision and network exposure before flashing.
+  The example configurations may include an HTTP web server. Never commit
+  `secrets.yaml`, personal logs or extracted LG controller firmware.
 
-V2.0.0 represents the consolidated result of earlier local development, protocol investigation and hardware testing. The repository contains the enhanced implementation, regression tests and relevant technical findings. Earlier experimental builds and intermediate versions are not included.
+## Recommended before a tagged release
 
-## Recommended before a public tagged release
-
-- [x] Pass 19 C++ standalone regression programs and Python/UI guard tests.
-- [x] Compile the renamed standard Slave example with ESPHome 2026.10.2.
-- [x] Record successful real-world operation of V2.0.0 across the installation.
-- [x] Compile the floor console example with ESPHome 2026.10.2.
-- [ ] Verify the merged public-name component on hardware if switching from an already-working internal development build (source logic is intended to match, but the renamed binary is newly compiled).
-- [ ] Review credentials, secrets, log samples, original licences and attribution.
-- [ ] Distinguish advanced features still under investigation from fully confirmed operation.
-
-## V2.0.1 candidate Floor Console test plan
-
-- Start with Garden Office only. Confirm the reboot log identifies V2.0.1.
-- After reboot, before a `CD` has been received, request **Top** in HA.
-  HA must keep its previous confirmed value; log `FLOOR TEMPLATE:` should
-  show a guarded `28` read, followed by a genuine `CD` and then `FLOOR TX:
-  page 5` for the selected value.
-- Expect **two matching indoor `CD` reports** and `FLOOR TX: CONFIRMED`
-  before HA displays Top as confirmed. Verify the physical discharge outlet.
-- Repeat separately for **Both** and **Bottom**, allowing each transaction
-  to finish. Observe the floor console's physical behaviour and wall Master.
-- Test with no recent Master/indoor A8+C8 pair or active sleep. The guard
-  must defer and time out with **no `2D` settings write** rather than
-  transmitting fabricated fields. Floor Console sleep-active bootstrap is
-  intentionally not enabled.
-- Test a newer HA direction during an outstanding request: latest choice
-  wins; older unconfirmed selections must not appear as a confirmed state.
-
-The C++ tests cover pure frame/scheduling decisions, but cannot verify the
-firmware task loop or the indoor unit's physical acceptance. Build both
-example YAMLs with ESPHome 2026.10.2 and check actual on-device logs.
+- [x] Test the V2.0.0 core controls on real LG hardware.
+- [x] Compile the V2.0.0 standard and Floor Console examples with
+  ESPHome 2026.10.2.
+- [x] Run the V2.0.4 offline suite (22 C++ tests plus Python checks).
+- [x] Observe delayed genuine indoor `CD` confirmation on ARNU07GQAA4.
+- [ ] Compile the final `main` example configurations after the latest merge.
+- [ ] Confirm repeated physical outlet movement and all model-specific
+  functions across power and mode transitions.
+- [ ] Review credential exclusions, public logs, attribution and licence.

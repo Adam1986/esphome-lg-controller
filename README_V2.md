@@ -1,6 +1,6 @@
-# LG Controller V2.0.0 — PREMTB100 Master / ESP32 Slave improvements
+# LG Controller V2 — PREMTB100 Master / ESP32 Slave improvements
 
-> **Status: hardware-tested community fork.** The maintainer reports V2.0.0 installed and operating successfully across their LG installation on 9 November 2026. Both example configurations using the public `lg_controller` component compiled with ESPHome **2026.10.2**. Further feature-specific tests and wider compatibility checks remain ongoing. This is **not an official upstream release**.
+> **Status: hardware-tested community fork, with experimental model-specific functions.** The V2.0.0 baseline was deployed on 9 November 2026, and both example configurations compiled with ESPHome **2026.10.2**. V2.0.4 Floor Console fast discharge has also been observed on real hardware, including delayed indoor `CD` confirmation of Bottom. The newest merged changes have not been certified for every unit or operating state. This is **not an official upstream release**.
 
 ## Background and credits
 
@@ -53,6 +53,8 @@ Review example hardware settings before flashing: GPIOs, ESP32 chip revision, UA
 - [Sleep reservation improvements](docs/v2/SLEEP_RESERVATIONS.md)
 - [Testing and limitations](docs/v2/TESTING_AND_LIMITATIONS.md)
 - [Change history](docs/v2/CHANGELOG_V2.md)
+- [Floor Console fast discharge (experimental)](docs/v2/FLOOR_FAST_DISCHARGE_V204.md)
+- [Historical Floor Console readback research](docs/v2/research/FLOOR_CONSOLE_INVESTIGATION.md)
 
 ## Contributions
 
@@ -166,34 +168,31 @@ names are intentionally preserved, avoiding unplanned changes to entity IDs.
 This is a naming refactor; LG packet formats, control behaviour, and vane
 wire mappings have not been intentionally changed.
 
-## V2.0.1 candidate — Floor Console template recovery
+## Floor Console discharge control and readback
 
-The Floor Console Home Assistant controls now wait for genuine indoor
-confirmation rather than optimistically switching to the requested value.
-If a required `AD`/`CD`/`CE.10` settings template is missing or expired,
-the Slave first attempts a **read-only** `28` full-settings request built
-from a recent, consistent real Master/indoor `A8`+`C8` pair. Only after a
-fresh genuine page arrives does it queue the targeted `2C`/`2D`/`2E` write.
-If it cannot safely retrieve that page, it reports the failure in the ESPHome
-logs; it does not send a guessed write.
+The merged Floor Console component can send ordinary genuine-template-based
+`2D` commands for **Top / Bottom / Both**. Unlike standard temperature, mode
+and fan control (`28` / `C8`), the indoor unit may not publish page-5 `CD`
+readback promptly unless a full settings refresh is requested.
 
-This is deliberately guarded by the **existing no-active-reservation policy
-for Floor Consoles**, unlike the separate sleep-safe startup diagnostics
-validated on ordinary indoor units. The read-before-write is limited to at
-most two guarded reads, and the existing transaction deadline bounds the
-wait. Source template ages and normal climate, sleep, vane and installer
-control behaviour are otherwise unchanged.
+The normal Floor Console path retains its guarded transmission and genuine
+indoor-unit confirmation rules. **Optional**
+`floor_console_fast_discharge: true` changes the user-facing behaviour for
+discharge direction only: after the transmitted command echoes, Home Assistant
+shows the *requested but unverified* choice. A coalesced full settings refresh
+checks for two consistent genuine indoor `CD` messages after 45 seconds of
+quiet and when the bus is available. The command-status entity distinguishes
+`SENT (UNVERIFIED)` from a later `CONFIRMED` result.
 
-The patch was prepared against the `feature/floor-console-naming` source ZIP.
-The complete revised source and a Git apply patch are supplied separately;
-this does not represent a merge into any remote GitHub repository. Offline
-C++ and Python regression tests passed; full ESPHome compile and physical
-readback of Top/Bottom/Both are still required.
+On 10 November 2026, the Garden Office `ARNU07GQAA4` produced a genuine indoor
+`CD` confirmation of Bottom after the delayed refresh. This is **not** proof
+of instant physical outlet movement or of reliable behaviour across every
+mode, power state, or rapid sequence. Comfort Cooling and Comfort Cooling Step
+remain under testing. See the [fast-discharge guide](docs/v2/FLOOR_FAST_DISCHARGE_V204.md)
+and [testing limitations](docs/v2/TESTING_AND_LIMITATIONS.md).
 
-
-## V2.0.3: selective-CD on-wire experiment (not yet verified)
-
-For Garden Office only, see [Selective CD live probe](docs/v2/SELECTIVE_CD_LIVE_PROBE.md).
-This adds an **opt-in experimental Type-D `2D.80` candidate**, not an established LG read opcode.
-Do not enable on ordinary units or merge to stable until physical tests confirm it is safe.
-The previous V2.0.2 passive readback should be disabled for this trial.
+Earlier attempts to observe a spontaneous `CD` and to query it using a
+speculative `2D.80` frame did not produce timely readback. Both options are
+**off by default** and should remain disabled; `2D.80` has **not** been
+verified as a read-only operation. The [research archive](docs/v2/research/FLOOR_CONSOLE_INVESTIGATION.md)
+records what was learned, without obsolete installation instructions.

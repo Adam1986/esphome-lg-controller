@@ -1,55 +1,100 @@
-# Floor Console V2.0.4: fast discharge / deferred verified readback (experimental)
+# Floor Console V2.0.4 — fast discharge and delayed readback (experimental)
 
-## Why
+> **LG ARNU07GQAA4 compatibility warning:** These Floor Console controls
+> are still being tested on hardware. Initial tests demonstrate ordinary
+> `2D` discharge commands and genuine delayed indoor `CD` confirmation, but
+> do not establish reliability in all operating states or immediate physical
+> outlet movement. Use with a genuine LG wall Master and supervise initial
+> tests.
 
-The Garden Office unit accepts ordinary `2D` direction writes but does **not** produce prompt spontaneous `CD` reports. Forcing a full `28` settings refresh immediately after *every* direction click starts a long burst of `C8/C9/CA/CB/CD/CE` messages at 100 baud. During the burst, subsequent direction changes may queue for 40–60+ seconds.
+## Why this exists
 
-Previous probes (`floor_console_passive_readback` and speculative `floor_console_selective_cd_probe`) both failed to yield an early `CD`, and added 10–12 seconds per attempt. Both must be set `false` for this experiment.
+Temperature, mode and fan-speed settings use normal status messages (`28`
+and indoor `C8`) and are reported routinely. The special Floor Console
+Top/Bottom/Both setting uses page-5 `2D` writes and `CD` readback instead.
+On the tested ARNU07GQAA4, `CD` was not reported promptly without a full
+`28` settings refresh. Repeating that refresh after every direction change
+occupied the 100-baud bus and delayed subsequent commands.
 
-## V2.0.4 strategy
+## How fast discharge works
 
-This is a **different UI trust model**, opt-in on the Garden Office only:
+1. Send the ordinary, checksum-validated `2D` discharge command from a
+   genuine LG settings template at the next safe bus opportunity. No new
+   on-wire opcode is introduced.
+2. After its **UART echo**, release the direction transaction and publish
+   the **requested (not yet verified)** selection in Home Assistant. The
+   command-status entity reports `SENT (UNVERIFIED)`. A UART echo is not proof
+   that the physical indoor unit accepted the command.
+3. Further direction selections can be queued without waiting for an
+   immediate full settings response after each click.
+4. After **45 seconds** without another direction transmission, schedule
+   **one** guarded full-settings `28` readback when the shared bus and
+   sleep-reservation safeguards permit it. The actual send may occur later.
+5. Compare two consistent genuine indoor `CD` messages with the most recent
+   requested direction. Report `CONFIRMED` on a match; otherwise correct
+   the displayed direction or report the outcome as unverified according to
+   the received status and timeout guards.
 
-1. Send the unchanged, genuine-template-based `2D` direction write at the next safe bus slot (existing 500 ms idle rule), with no new packet types.
-2. After **UART echo**, publish the **requested** direction to Home Assistant and release the transaction, explicitly marked `SENT (UNVERIFIED)` in the `Floor - Command Status` diagnostic. This is *optimistic*, not a statement of indoor acceptance.
-3. If another choice arrives, transmit it at the next safe slot instead of waiting for the preceding selection's full-settings burst. Only the latest choice needs verification.
-4. Once no further direction has been sent for **45 seconds**, issue **one** guarded, read-only `28` full-settings refresh using the existing current A8/C8 pairing, provided there is no active sleep reservation. This still takes a while to produce `CD`, but a group of selections causes only one expensive refresh.
-5. Read two matching genuine indoor `CD` reports. If they match the requested direction, status becomes `CONFIRMED`. If two consistent reports disagree, publish the indoor's actual direction and status `REJECTED/OVERRIDDEN`. If no safe refresh or no indoor reports arrive within bounded time, report `UNVERIFIED` and leave the last requested direction visibly optimistic, subject to correction by a later genuine CD.
-6. A newly changed physical wall-controller AD overrides a pending optimistic HA request. The 2D.80 probe is never transmitted in fast mode.
+The normal 500 ms bus-idle checks, source-template validation and safety
+guards are retained. The feature does not speed up an outgoing `2D` during
+an already-running LG full-settings exchange.
 
-This **does not** speed up an individual outgoing 2D when the LG bus is already occupied. The main expected benefit is avoiding repeated ~minute-long full-settings responses when several direction selections occur in succession.
+## Configuration
 
-## Activation on Garden Office
+In a Floor Console device that uses the merged component on `main`:
 
 ```yaml
 external_components:
-  - source: github://Adam1986/esphome-lg-controller@experiment/floor-console-passive-cd
+  - source: github://Adam1986/esphome-lg-controller@main
     components: [lg_controller]
     refresh: 10min
 
 climate:
   - platform: lg_controller
-    # ... existing configuration ...
+    # Keep your existing device-specific settings and controls here
     floor_console_features: true
     floor_console_monitoring: true
     floor_console_passive_readback: false
     floor_console_selective_cd_probe: false
-    floor_console_fast_discharge: true
+    floor_console_fast_discharge: true  # Experimental, opt-in
     floor_console_command_status:
       name: "Floor - Command Status"
       internal: false
 ```
 
-This is deliberately not enabled by default; all other units keep existing strict confirmation.
+This is an **illustrative fragment**, not a complete ESPHome configuration.
+Keep your own pins, substitutions, Master/Slave setting, and source-template
+configuration. The repository's shared Floor Console example leaves fast
+discharge **off by default**.
 
-## Live test
+## Evidence from the 10 November 2026 trial
 
-* With no active sleep timer and a physical controller available, choose Top, then Both, then Bottom around 4–8 seconds apart. Record physical outlet response, *not just* the HA selection.
-* Look for the `FLOOR TX: page 5` and `FLOOR TX: SENT (UNVERIFIED)` messages, and ensure **no** `2D.80` or immediate `FLOOR READBACK: guarded 28` appears after each selection.
-* After 45 seconds without another direction selection, look for `FLOOR FAST: one coalesced guarded 28 readback` and subsequently two genuine `CD` messages; confirm HA agrees with the actual physical outlet.
-* Repeat with a single change, then observe the delayed confirmation. Do not interpret the immediate HA value as proof of indoor acceptance.
-* If unexpected operation occurs, disable `floor_console_fast_discharge` and retain both older experimental flags as `false` to return to the original strict V2.0.1 behaviour.
+- The initial fast-discharge build contained a loop-timestamp ordering
+  defect: a UART echo could be processed after the scheduler had captured
+  its time, causing unsigned timer underflow and immediate `UNVERIFIED`
+  status. The subsequent patch corrected that defect.
+- Following the fix, a **Bottom** direction command was queued at
+  **23:37:08**, sent at **23:37:14**, and echoed / shown as requested by
+  **23:37:16**.
+- The one delayed guarded settings refresh started at **23:38:11**.
+  Matching genuine indoor `CD` reports arrived at **23:38:34** and
+  **23:38:37**, and command status became `CONFIRMED`.
+- This verifies the deferred-confirmation mechanism for that test. It
+  does **not** quantify physical outlet movement speed or prove every
+  command succeeds. Additional physical tests remain necessary.
 
-## Caveats
+## Practical testing and fallback
 
-The full settings poll still occupies the shared bus for a prolonged time once triggered; we have merely reduced its frequency. No verified selective Type-D read command has been identified. The delayed readback also depends on a safe, fresh Master/indoor Type-0 pair; it may be skipped during unsettled state or active sleep. This patch has offline unit and configuration checks but **no full ESPHome compile nor physical test** in the authoring environment.
+Start with no active sleep reservation and somebody present at the unit.
+Change Top / Both / Bottom one at a time, observe the physical discharge
+outlets, and compare the timing with `FLOOR TX` and `CD` messages. Leave the
+unit untouched long enough for a delayed refresh to complete.
+
+If behaviour is unexpected, disable `floor_console_fast_discharge` and keep
+`floor_console_passive_readback` and `floor_console_selective_cd_probe`
+set to `false`. This restores the strict Floor Console readback path, while
+retaining normal bus and sleep guards.
+
+The unsuccessful `2D.80` selective request is **not** validated as a
+read-only command and should not be enabled. Historical evidence is recorded
+in [Floor Console research](research/FLOOR_CONSOLE_INVESTIGATION.md).
