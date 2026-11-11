@@ -105,13 +105,16 @@ climate:
     # Optional read-only diagnostics and experimental write-enabled controls.
     floor_console_monitoring: true
     floor_console_features: true
-    # V2.0.2 EXPERIMENT: watch for unsolicited CD for 12s before the usual
-    # full-settings readback. Helps coalesce rapid Top/Bottom/Both changes.
-    # This experiment DOES send one unverified 2D.80 candidate after a real direction change.
-    # V2.0.2 passive CD observation made one-off changes slower in real tests.
+    # ARNU07GQAA4: Floor Console special controls are still undergoing
+    # physical testing. Functions may not work reliably on all models/modes.
+    # V2.0.2 passive-CD and V2.0.3 unverified 2D.80 probe did not provide
+    # timely readback on the tested unit; keep BOTH disabled.
     floor_console_passive_readback: false
-    # UNVERIFIED Type-D 2D.80 probe; test only on the floor console.
-    floor_console_selective_cd_probe: true
+    floor_console_selective_cd_probe: false
+    # V2.0.4 fast discharge is experimental and should be enabled only for
+    # supervised testing. When true, Home Assistant shows the requested
+    # direction after UART echo, with genuine CD confirmation deferred.
+    floor_console_fast_discharge: false
     # This floor console installation: index 0 displays raw 6 (Up), index 6 raw 0 (Default).
     # TX and RX both translate back to the original LG wire values.
     floor_console_reversed_airflow: true

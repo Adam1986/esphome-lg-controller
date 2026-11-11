@@ -16,6 +16,15 @@ aliases. The 19 existing C++ regression programs and additional Python alias
 checks pass offline. A full ESPHome configuration validation and compilation
 of both examples in Codespaces is required before merging this change.
 
+## LG ARNU07GQAA4 Floor Console — testing in progress (11 November 2026)
+
+- **Status:** experimental; the Floor Console controls are **not yet fully validated** on model `ARNU07GQAA4`. Functions may behave unexpectedly, fail to apply, or take longer than ordinary fan-speed/temperature changes. Other LG Floor Console models are not validated by this result.
+- **Observed:** on-device trials in ESP32 Slave mode with a genuine LG wall Master have shown normal `2D` commands for Top / Both / Bottom and later matching genuine indoor `CD` reports for a discharge-direction selection. The latest fast-discharge test confirmed Bottom after a delayed full-settings readback. This does not prove the physical outlet responds instantly, or that every selection succeeds under all conditions.
+- **Fast-discharge option:** `floor_console_fast_discharge` is experimental and opt-in. After a UART echo, Home Assistant may show the **requested, unverified** direction; one later guarded `28` settings refresh checks for two consistent indoor `CD` reports. The command-status diagnostic distinguishes `SENT (UNVERIFIED)` from `CONFIRMED` and other outcomes.
+- **Unsuccessful earlier experiments:** spontaneous passive `CD` readback and the unverified `2D.80` selective-read candidate did not yield timely confirmations on the tested unit. Keep `floor_console_passive_readback: false` and `floor_console_selective_cd_probe: false`; the `2D.80` candidate is not proven read-only.
+- **Still to confirm:** repeated physical outlet response times, rapid successive selections, external changes from the wall controller, interactions with power/mode/fan, Comfort Cooling and Comfort Cooling Step, sleep reservation behaviour, startup recovery, and long-term stability.
+- **Use:** supervise initial testing; retain the genuine wall controller as Master and do not rely on unconfirmed console-specific behaviour for unattended operation.
+
 ## Known limits and areas for additional testing
 
 - Both standard and floor console examples compile successfully. Model-specific floor console functionality still requires further hardware validation.

@@ -20,6 +20,8 @@ Improve **ESP32 Slave** control while retaining physical LG **PREMTB100 Master**
 - **8-hour support:** many tested wall-controller models expose up to 480 minutes. V2's Home Assistant input supports 0–480 minutes, but the full 480-minute set/readback/expiry flow has not yet been proven end to end.
 - **Diagnostics/features:** extended discovery, pipe-temperature handling, installer-related diagnostics and floor console optional controls; actual support depends on indoor unit model.
 
+> **LG ARNU07GQAA4 Floor Console — experimental:** The additional Floor Console controls are still undergoing physical testing. The Top / Bottom / Both discharge-direction path has produced genuine indoor-unit confirmations in limited tests, but this does not establish reliable behaviour across all functions or conditions. Comfort Cooling, Comfort Cooling Step and other console-specific behaviour may not work as expected until further verification. Optional fast discharge displays the **requested** setting after a UART echo and verifies it later, so the selector can temporarily differ from the actual indoor-unit state. See [testing and limitations](docs/v2/TESTING_AND_LIMITATIONS.md).
+
 A valid transmit or UART echo should **not** be treated as proof that the indoor unit accepted a command. Readback from the physical controller and indoor unit remains important.
 
 ## Repository layout
