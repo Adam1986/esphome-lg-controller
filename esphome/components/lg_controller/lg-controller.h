@@ -18,6 +18,8 @@
 #include "floor_console_flow.h"
 
 #include "esphome.h"
+#include "esphome/core/alloc_helpers.h"
+
 #ifdef USE_API
 #include "esphome/components/api/api_server.h"
 #endif
