@@ -296,6 +296,10 @@ climate:
     power_consumption:
       name: Power Consumption
       id: power_consumption
+    actual_fan_speed_raw:
+      name: Actual Indoor Fan Speed (Raw)
+      entity_category: diagnostic
+
     current_power:
       name: Current Power
       id: current_power
