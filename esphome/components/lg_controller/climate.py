@@ -61,6 +61,7 @@ CONF_PIPE_TEMP_OUT = "pipe_temp_out"
 CONF_REFRESH_PIPE_TEMPERATURES = "refresh_pipe_temperatures"
 CONF_POWER_CONSUMPTION = "power_consumption"
 CONF_CURRENT_POWER = "current_power"
+CONF_ACTUAL_FAN_SPEED_RAW = "actual_fan_speed_raw"
 CONF_HUMIDITY = "humidity"
 CONF_FAN_OPERATION_TIME = "fan_operation_time"
 CONF_INDOOR_UNIT_OPERATION_TIME = "indoor_unit_operation_time"
@@ -228,6 +229,12 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_POWER,
             state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ACTUAL_FAN_SPEED_RAW): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+            entity_category="diagnostic",
+            icon="mdi:fan",
         ),
         cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
@@ -434,6 +441,9 @@ async def to_code(config):
     # Never use an explicit installer overcooling target while acting as Slave.
     cg.add(var.set_overcooling_target(-1 if config[CONF_IS_SLAVE_CONTROLLER] else config[CONF_OVERCOOLING_SETTING]))
     cg.add(var.set_target_temperature_step(config[CONF_TARGET_TEMPERATURE_STEP]))
+    if CONF_ACTUAL_FAN_SPEED_RAW in config:
+        fan_feedback = await sensor.new_sensor(config[CONF_ACTUAL_FAN_SPEED_RAW])
+        cg.add(var.set_actual_fan_speed_raw_sensor(fan_feedback))
     if not config[CONF_IS_SLAVE_CONTROLLER] and CONF_TEMPERATURE_CONTROL_STEP in config:
         step_sel = await select.new_select(
             config[CONF_TEMPERATURE_CONTROL_STEP], options=TEMPERATURE_CONTROL_STEP_OPTIONS
