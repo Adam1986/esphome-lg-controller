@@ -37,6 +37,7 @@ LgPipeTemperatureRefreshButton = lg_controller_ns.class_(
 
 CONF_FAHRENHEIT = "fahrenheit"
 CONF_IS_SLAVE_CONTROLLER = "is_slave_controller"
+CONF_SLAVE_LISTEN_ONLY = "slave_listen_only"
 CONF_TARGET_TEMPERATURE_STEP = "target_temperature_step"
 CONF_OVERCOOLING_SETTING = "overcooling_setting"
 
@@ -187,6 +188,7 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
 
         cv.Required(CONF_FAHRENHEIT): cv.boolean,
         cv.Required(CONF_IS_SLAVE_CONTROLLER): cv.boolean,
+        cv.Optional(CONF_SLAVE_LISTEN_ONLY, default=False): cv.boolean,
         cv.Optional(CONF_TARGET_TEMPERATURE_STEP, default=0.5): cv.one_of(0.5, 1.0, float=True),
         # Installer setting 27 to write to the unit (0-3). -1 or omitted = echo the unit's value.
         cv.Optional(CONF_OVERCOOLING_SETTING, default=-1): cv.int_range(min=-1, max=3),
@@ -341,7 +343,13 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
 ).extend(cv.COMPONENT_SCHEMA).extend(uart.UART_DEVICE_SCHEMA)
 
 # Convert legacy names before the canonical schema validates and supplies defaults.
-CONFIG_SCHEMA = cv.All(_normalize_floor_console_keys, CONFIG_SCHEMA)
+def _validate_slave_listen_only(config):
+    if config[CONF_SLAVE_LISTEN_ONLY] and not config[CONF_IS_SLAVE_CONTROLLER]:
+        raise cv.Invalid("slave_listen_only requires is_slave_controller: true")
+    return config
+
+
+CONFIG_SCHEMA = cv.All(_normalize_floor_console_keys, CONFIG_SCHEMA, _validate_slave_listen_only)
 
 
 async def to_code(config):
@@ -470,6 +478,7 @@ async def to_code(config):
     cg.add(var.set_floor_console_passive_readback(config[CONF_FLOOR_CONSOLE_PASSIVE_READBACK]))
     cg.add(var.set_floor_console_selective_cd_probe(config[CONF_FLOOR_CONSOLE_SELECTIVE_CD_PROBE]))
     cg.add(var.set_floor_console_fast_discharge(config[CONF_FLOOR_CONSOLE_FAST_DISCHARGE]))
+    cg.add(var.set_slave_listen_only(config[CONF_SLAVE_LISTEN_ONLY]))
     cg.add(var.set_slave_sleep_safe_discovery(config[CONF_SLAVE_SLEEP_SAFE_DISCOVERY]))
     if CONF_FILTER_TIME_REMAINING in config:
         filt = await sensor.new_sensor(config[CONF_FILTER_TIME_REMAINING])
