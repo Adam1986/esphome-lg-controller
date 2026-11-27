@@ -604,6 +604,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     enum class MessageSender : uint8_t { Unit, Master, Slave };
     // Set if this controller is configured as slave controller.
     const bool slave_;
+    bool slave_listen_only_ = false;
 
     enum class LgCapability {
         FAN_AUTO,
@@ -841,6 +842,7 @@ public:
     void set_floor_console_passive_readback(bool v) { floor_console_passive_readback_ = v; }
     void set_floor_console_fast_discharge(bool v) { floor_console_fast_discharge_ = v; }
     void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
+    void set_slave_listen_only(bool v) { slave_listen_only_ = slave_ && v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
     void set_actual_fan_speed_raw_sensor(sensor::Sensor *s) { actual_fan_speed_raw_ = s; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
@@ -1123,6 +1125,8 @@ public:
         // Clear state potentially raised by restored entities during setup;
         // later explicit Home Assistant commands will set it again.
         if (slave_) {
+            if (slave_listen_only_)
+                ESP_LOGW(TAG, "SLAVE LISTEN ONLY: all UART transmissions disabled; use wall controller for control");
             slave_startup_millis_ = millis();
             pending_status_change_ = false;
             user_changed_settings_ = false;
@@ -1154,6 +1158,10 @@ public:
 
     // Process changes from HA.
     void control(const climate::ClimateCall &call) override {
+        if (slave_listen_only_) {
+            ESP_LOGW(TAG, "SLAVE LISTEN ONLY: ignoring HA climate command");
+            return;
+        }
         if (call.get_mode().has_value()) {
             this->mode = *call.get_mode();
             operation_mode_changed_ = true;
@@ -1274,6 +1282,10 @@ public:
             }
             return;
         }
+
+        // Every UART send is dispatched below this point in loop(). In the
+        // opt-in diagnostic trial do not transmit commands, retries or polls.
+        if (slave_listen_only_) return;
 
         // If we did not receive the message we sent last time, try to send it again.
         // Ignore this when we're initializing because the unit then immediately responds by
@@ -2993,7 +3005,7 @@ private:
         // Don't update our settings if we have a pending change/send,
         // because else we overwrite changes we still have to send (or
         // are sending) to the AC.
-        if (user_changed_settings_ &&
+        if (!slave_listen_only_ && user_changed_settings_ &&
             (pending_status_change_ ||
              pending_send_ == PendingSendKind::Status ||
              (slave_ && slave_ack_pending_))) {
@@ -4201,6 +4213,7 @@ private:
     }
 
     void update() {
+        if (slave_listen_only_) return;
         uint32_t millis_now = millis();
 
         // Handle sleep timer.
