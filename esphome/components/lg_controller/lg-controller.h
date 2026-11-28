@@ -3596,7 +3596,10 @@ private:
         if (slave_ && supported && !was_supported)
             ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
                      unsigned(raw));
-        if (supported && actual_fan_speed_raw_ != nullptr) {
+        // Diagnostics expose the actual CF byte even before support is learned.
+        // A zero on an unsupported unit is ambiguous; it must not establish
+        // fan capability or override C8 heating status.
+        if (actual_fan_speed_raw_ != nullptr) {
             actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
             actual_fan_speed_raw_published_ = true;
         }
