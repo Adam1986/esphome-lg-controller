@@ -359,6 +359,7 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     OutdoorStatus outdoor_status_;
     FanFeedback fan_feedback_;
     sensor::Sensor* actual_fan_speed_raw_ = nullptr;
+    bool actual_fan_speed_raw_published_ = false;
 
     LgSwitch& purifier_;
     LgSwitch& internal_thermistor_;
@@ -1242,6 +1243,14 @@ public:
 
     void loop() override {
         uint32_t millis_now = millis();
+
+        // The diagnostic shows the last fresh CF reading, independent of
+        // mode transitions that invalidate the heating inference.
+        if (actual_fan_speed_raw_published_ &&
+            uint32_t(millis_now - fan_feedback_.sampled_at) >= FanFeedback::MAX_AGE_MS) {
+            actual_fan_speed_raw_->publish_state(NAN);
+            actual_fan_speed_raw_published_ = false;
+        }
 
         // Expire fan inference even on a passive Slave or a quiet bus.
         if (fan_feedback_.expire(millis_now) && slave_)
@@ -3587,8 +3596,10 @@ private:
         if (slave_ && supported && !was_supported)
             ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
                      unsigned(raw));
-        if (supported && actual_fan_speed_raw_ != nullptr)
+        if (supported && actual_fan_speed_raw_ != nullptr) {
             actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
+            actual_fan_speed_raw_published_ = true;
+        }
         refresh_slave_fan_action_(now);
     }
 

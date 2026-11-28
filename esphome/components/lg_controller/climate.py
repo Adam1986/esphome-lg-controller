@@ -232,7 +232,9 @@ CONFIG_SCHEMA = climate.climate_schema(LgController).extend(
             device_class=DEVICE_CLASS_POWER,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_ACTUAL_FAN_SPEED_RAW): sensor.sensor_schema(
+        # Automatically expose the same raw CF reading used for idle inference.
+        cv.Optional(CONF_ACTUAL_FAN_SPEED_RAW,
+                    default={"name": "Actual Indoor Fan Speed (Raw)"}): sensor.sensor_schema(
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
             entity_category="diagnostic",
