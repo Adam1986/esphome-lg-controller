@@ -18,11 +18,133 @@ Improve **ESP32 Slave** control while retaining physical LG **PREMTB100 Master**
 - **Slave state/command handling:** preserve genuine Master settings, improve command construction, startup synchronisation, pending-change arbitration, retries, and readback confirmation from the LG system.
 - **Sleep reservations:** track remaining time reported by the Master (`A8`) rather than relying only on an independent ESP32 countdown. Improve set/cancel synchronisation and avoid competing local expiry shutdowns. Cancellation and model-specific edge cases still require continued testing.
 - **8-hour support:** many tested wall-controller models expose up to 480 minutes. V2's Home Assistant input supports 0–480 minutes, but the full 480-minute set/readback/expiry flow has not yet been proven end to end.
+- **Heating / idle operating state:** genuine indoor status is authoritative in Slave mode, with automatically learned, persistent CF fan feedback refining HEATING/IDLE on supported models. Unsupported units retain the ordinary status routine. See [heating / idle operating-state detection](#heating--idle-operating-state-detection-november-2026).
 - **Diagnostics/features:** extended discovery, pipe-temperature handling, installer-related diagnostics and floor console optional controls; actual support depends on indoor unit model.
 
 > **LG ARNU07GQAA4 Floor Console — experimental:** The additional Floor Console controls are still undergoing physical testing. The Top / Bottom / Both discharge-direction path has produced genuine indoor-unit confirmations in limited tests, but this does not establish reliable behaviour across all functions or conditions. Comfort Cooling, Comfort Cooling Step and other console-specific behaviour may not work as expected until further verification. Optional fast discharge displays the **requested** setting after a UART echo and verifies it later, so the selector can temporarily differ from the actual indoor-unit state. See [testing and limitations](docs/v2/TESTING_AND_LIMITATIONS.md).
 
 A valid transmit or UART echo should **not** be treated as proof that the indoor unit accepted a command. Readback from the physical controller and indoor unit remains important.
+
+## Heating / idle operating-state detection (November 2026)
+
+### Investigation and findings
+
+Home Assistant distinguishes the selected climate mode (`HEAT`) from the
+current climate action (`HEATING` or `IDLE`). In the tested ten-zone
+installation with PREMTB100 Masters and ESP32 Slaves, some ducted and Floor
+Console indoor units continued to report `HEATING` after satisfying their
+temperature demand and stopping their indoor fan. The shared outdoor unit
+could remain running to serve another zone. The five-unit ESP32 Master
+installation used for comparison did not exhibit the same problem in the
+observed heating cycles.
+
+The investigation compared genuine Master `A8` and indoor `C8` status,
+extended indoor `CF` messages, installer fan settings and physical equipment
+behaviour. Changing UART timing from 100 to 104 baud during testing did not
+resolve the discrepancy. The outdoor-running flag alone was insufficient
+to distinguish local heating demand from shared outdoor activity on some
+units. The upper two bits of C8 byte 7 also differed between the installations:
+the heating-direction flag was commonly populated in the Master installation
+but absent in the tested Slave installation. Those bits are not established
+as a per-indoor-unit Thermo ON/OFF indication.
+
+A useful additional observation was that **CF byte 11 (zero-based indexing)**
+tracked actual indoor fan activity on several ducted units and the tested
+Floor Console. Nonzero values broadly corresponded to the installer fan-speed
+settings; zero was observed when the fan stopped. The three tested wall-mounted
+units instead returned zero in this field even during confirmed heating, with
+CF bytes 9 and 10 also unpopulated. A zero reading alone therefore cannot
+establish that a fan has stopped.
+
+### Implemented approach
+
+- **Authoritative operating status:** in Slave mode only genuine indoor
+  `C8` status updates operating telemetry and climate action. Master `A8`
+  messages remain important for settings, temperature and synchronisation,
+  but cannot overwrite indoor operating feedback. Operating status is
+  evaluated independently of pending command and settings-acceptance guards.
+  Slave action is not set optimistically from a Home Assistant mode request.
+- **Outdoor status debounce:** retain the eight-second suppression of brief
+  outdoor ON/OFF chatter, measuring from an accepted state transition rather
+  than repeatedly restarting the timer on rejected readings.
+- **Automatic fan capability detection:** learn support from a genuine
+  nonzero indoor `CF` fan reading. Only refine an existing C8-derived
+  `HEATING` action in explicit Slave HEAT mode. A valid, fresh zero can
+  refine it to `IDLE`; a nonzero value retains `HEATING`.
+- **Unsupported / ambiguous feedback:** an all-zero CF byte 9/10/11 group
+  cannot establish a stopped fan, even if capability was previously learned.
+  Unsupported units retain the ordinary C8 operating-state routine. This
+  preserves the tested wall-mounted units' behaviour without model lists.
+- **Persistent capability:** save the learned capability in a separate
+  ESPHome preference on first successful detection, without changing the
+  existing C9 capability storage. Restore only the learned marker after a
+  reboot, never the actual fan reading. The first installation of this change
+  still requires a nonzero reading before support can be saved. A failed
+  preference write leaves detection available for the current boot.
+- **Freshness and priority:** require new fan evidence after transitions into
+  or out of a C8 heating candidate; expire fan inference after three minutes
+  without a fresh valid sample. OFF, defrost, preheat and the ordinary
+  non-heating actions remain authoritative. Master mode does not use the
+  fan-based action refinement.
+
+The refinement is passive: no additional LG polling, UART commands, LGAP
+integration or base-YAML changes are required. The same implementation is
+used in the standard Slave and experimental V2.0.6 Floor Console branches.
+It does not change the Floor Console discharge-control or readback scheduling.
+
+### Automatic diagnostic sensor
+
+**Actual Indoor Fan Speed (Raw)** (`actual_fan_speed_raw`) is automatically
+registered as a Home Assistant diagnostic sensor. Existing explicit YAML
+definitions of this sensor remain supported. It exposes the raw indoor CF
+byte, including zero before capability is established, and becomes unknown
+when no new CF reading has been received for three minutes. The sensor is
+independent of the action-inference gate.
+
+| Raw diagnostic | Interpretation |
+| --- | --- |
+| Nonzero (e.g. 78, 88) | Observed fan feedback; raw protocol value, not confirmed RPM or percent |
+| Zero, learned support and populated CF temperature fields | Usable stopped-fan evidence in the supported Slave HEAT context |
+| Zero, support not learned or CF temperature fields empty | Ambiguous; retain C8-derived action |
+| Unknown / stale | No current CF diagnostic reading; do not rely on fan inference |
+
+Useful log messages include `SLAVE HEAT: detected indoor CF fan feedback`,
+`SLAVE HEAT: saved learned CF fan feedback support`, and
+`SLAVE HEAT: restored learned CF fan feedback support; awaiting fresh sample`.
+An action transition driven by the CF refinement is logged with
+`SLAVE HEAT: IDLE (CF fan feedback / C8 fallback)` or its HEATING equivalent.
+
+### Hardware observations and limitations
+
+On 28 November 2026, a post-update capture from approximately 11:26 to 13:35
+contained 2,222 checksum-valid C8 and 2,077 checksum-valid CF messages across
+ten indoor units. All 646 CF frames from the three wall-mounted units had
+zero fan and temperature fields; no CF-driven action transitions were logged
+for those units. One ducted unit repeatedly changed between HEATING and IDLE
+following nonzero and zero fan feedback. Another wall-mounted unit completed
+multiple ordinary C8-based heating cycles despite its constant zero raw fan
+reading. Two ducted units logged successful capability storage earlier in the
+capture and subsequently entered fan-derived IDLE with zero-only feedback
+after the update, consistent with persisted capability being used. Some units
+had not yet produced a nonzero reading with persistence enabled and therefore
+still needed an active heating cycle to learn support.
+
+The observations support the approach on the tested equipment, but **CF fan
+feedback is an empirical proxy for heating activity, not a decoded Thermo
+ON/OFF flag**. A unit with continuous fan operation during thermo-off may
+still report HEATING; other models may encode these fields differently. A
+long preheat period can legitimately keep the climate action IDLE even when
+the selected mode is HEAT. Unsupported units may still be limited by the
+original C8 flags. The three-minute timeout is a conservative implementation
+choice, not a documented LG protocol guarantee. Full validation across other
+models, cooling, all operating modes and repeated power cycles remains
+necessary.
+
+The regression cases in
+[`test_lg_operating_status.cpp`](esphome/tests/test_lg_operating_status.cpp)
+cover source selection, outdoor debounce, learned capability restoration,
+zero-only units, empty CF telemetry, freshness, mode transitions and timer
+wraparound. Offline tests do not replace live equipment validation.
 
 ## Repository layout
 
