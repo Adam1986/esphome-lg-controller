@@ -358,6 +358,12 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     esphome::binary_sensor::BinarySensor& auto_dry_active_;
     OutdoorStatus outdoor_status_;
     FanFeedback fan_feedback_;
+    // Separate preference: do not change the existing C9 storage layout/key.
+    static constexpr uint32_t FAN_FEEDBACK_PREF_KEY = 0xCF11A601u;
+    static constexpr uint32_t FAN_FEEDBACK_LEARNED = 0xCF11F001u;
+    ESPPreferenceObject fan_feedback_pref_;
+    bool fan_feedback_persisted_ = false;
+    bool fan_feedback_save_attempted_ = false;
     sensor::Sensor* actual_fan_speed_raw_ = nullptr;
     bool actual_fan_speed_raw_published_ = false;
 
@@ -1086,6 +1092,17 @@ public:
         // Load our custom NVS storage to get the capabilities message
         ESPPreferenceObject pref = global_preferences->make_preference<NVSStorage>(this->get_object_id_hash() ^ NVS_STORAGE_VERSION);
         pref.load(&nvs_storage_);
+
+        if (slave_) {
+            fan_feedback_pref_ = global_preferences->make_preference<uint32_t>(
+                this->get_object_id_hash() ^ FAN_FEEDBACK_PREF_KEY);
+            uint32_t learned = 0;
+            if (fan_feedback_pref_.load(&learned) && learned == FAN_FEEDBACK_LEARNED) {
+                fan_feedback_.restore_support(true);
+                fan_feedback_persisted_ = true;
+                ESP_LOGI(TAG, "SLAVE HEAT: restored learned CF fan feedback support; awaiting fresh sample");
+            }
+        }
 
         auto restore = this->restore_state_();
         if (restore.has_value()) {
@@ -3596,6 +3613,20 @@ private:
         if (slave_ && supported && !was_supported)
             ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
                      unsigned(raw));
+        // Save once on first actual nonzero feedback, never on ordinary fan
+        // transitions. ESPHome batches preference writes; explicitly sync
+        // this single learned marker so an immediate OTA does not lose it.
+        if (slave_ && raw != 0 && !fan_feedback_persisted_ &&
+            !fan_feedback_save_attempted_) {
+            fan_feedback_save_attempted_ = true;
+            uint32_t learned = FAN_FEEDBACK_LEARNED;
+            if (fan_feedback_pref_.save(&learned) && global_preferences->sync()) {
+                fan_feedback_persisted_ = true;
+                ESP_LOGI(TAG, "SLAVE HEAT: saved learned CF fan feedback support");
+            } else {
+                ESP_LOGW(TAG, "SLAVE HEAT: unable to persist CF fan support; relearn after reboot");
+            }
+        }
         // Diagnostics expose the actual CF byte even before support is learned.
         // A zero on an unsupported unit is ambiguous; it must not establish
         // fan capability or override C8 heating status.

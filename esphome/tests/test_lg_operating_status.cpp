@@ -80,6 +80,24 @@ int main() {
     assert(other.observe(0, 30));
     assert(other.stopped(30));
 
+    // A reboot while idle restores capability, but never a stale sample.
+    FanFeedback restored;
+    restored.restore_support(true);
+    restored.set_heating_candidate(true);
+    assert(restored.supported);
+    assert(!restored.stopped(100));
+    assert(restored.observe(0, 200));
+    assert(restored.stopped(200));
+    assert(restored.observe(79, 300));
+    assert(!restored.stopped(300));
+
+    // No learned marker: zero-only units must still use C8.
+    FanFeedback unknown;
+    unknown.restore_support(false);
+    unknown.set_heating_candidate(true);
+    assert(!unknown.observe(0, 200));
+    assert(!unknown.stopped(200));
+
     // Unsigned time difference survives millis() wrap.
     assert(fan.observe(0, UINT32_MAX - 999));
     assert(fan.stopped(1000));
