@@ -368,6 +368,8 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     esphome::binary_sensor::BinarySensor& auto_dry_active_;
     OutdoorStatus outdoor_status_;
     FanFeedback fan_feedback_;
+    sensor::Sensor* actual_fan_speed_raw_ = nullptr;
+    bool actual_fan_speed_raw_published_ = false;
 
     LgSwitch& purifier_;
     LgSwitch& internal_thermistor_;
@@ -858,6 +860,7 @@ public:
     }
     void set_floor_console_selective_cd_probe(bool v) { floor_console_selective_cd_probe_ = v; }
     void set_slave_sleep_safe_discovery(bool v) { slave_sleep_safe_discovery_ = v; }
+    void set_actual_fan_speed_raw_sensor(sensor::Sensor *s) { actual_fan_speed_raw_ = s; }
     void set_filter_time_remaining_sensor(sensor::Sensor *s) { filter_time_remaining_ = s; }
     void set_filter_remaining_percent_sensor(sensor::Sensor *s) { filter_remaining_percent_ = s; }
     void set_filter_nominal_life_hours(uint16_t hours) { filter_nominal_life_hours_ = hours; }
@@ -1256,6 +1259,14 @@ public:
 
     void loop() override {
         uint32_t millis_now = millis();
+
+        // The diagnostic shows the last fresh CF reading, independent of
+        // mode transitions that invalidate the heating inference.
+        if (actual_fan_speed_raw_published_ &&
+            uint32_t(millis_now - fan_feedback_.sampled_at) >= FanFeedback::MAX_AGE_MS) {
+            actual_fan_speed_raw_->publish_state(NAN);
+            actual_fan_speed_raw_published_ = false;
+        }
 
         // Expire fan inference even on a passive Slave or a quiet bus.
         if (fan_feedback_.expire(millis_now) && slave_)
@@ -3601,6 +3612,10 @@ private:
         if (slave_ && supported && !was_supported)
             ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
                      unsigned(raw));
+        if (supported && actual_fan_speed_raw_ != nullptr) {
+            actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
+            actual_fan_speed_raw_published_ = true;
+        }
         refresh_slave_fan_action_(now);
     }
 
