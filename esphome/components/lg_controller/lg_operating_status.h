@@ -45,11 +45,15 @@ struct FanFeedback {
         sample_valid = false;
     }
 
-    bool observe(uint8_t value, uint32_t now) {
+    // In captured wall-mounted units CF bytes 9, 10 and 11 are all zero
+    // even while heating. A zero in that unpopulated telemetry group is
+    // ambiguous, including after restoring previously learned capability.
+    // Retain C8 fallback rather than infer a stopped fan from such a frame.
+    bool observe(uint8_t value, uint32_t now, bool telemetry_populated) {
         if (value != 0) supported = true;
         raw = value;
         sampled_at = now;
-        sample_valid = supported;
+        sample_valid = supported && (value != 0 || telemetry_populated);
         return supported;
     }
 
