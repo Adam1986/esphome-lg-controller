@@ -33,11 +33,57 @@ int main() {
     assert(!wrap.observe(false, 1000));
     assert(wrap.observe(false, 5000));
 
-    // Unsupported wall units remain unknown even if all CF frames are zero.
+    // Unsupported wall units retain the baseline even with repeated zeros.
     FanFeedback fan;
-    assert(!fan.observe(0));
-    assert(!fan.observe(0));
-    assert(fan.observe(45));
-    assert(fan.observe(38));
-    assert(fan.observe(0));  // Now zero is a meaningful observed value.
+    fan.set_heating_candidate(true);
+    assert(!fan.observe(0, 1000));
+    assert(!fan.observe(0, 2000));
+    assert(!fan.stopped(2000));
+    assert(fan.observe(45, 3000));
+    assert(!fan.stopped(3000));
+    assert(fan.observe(38, 4000));
+    assert(fan.observe(0, 5000));
+    assert(fan.stopped(5000));
+
+    // Repeated C8 heating status must not erase fresh idle evidence.
+    fan.set_heating_candidate(true);
+    assert(fan.stopped(6000));
+    assert(fan.observe(45, 7000));
+    assert(!fan.stopped(7000));
+
+    // Stale feedback falls back; later valid zero restores inference.
+    assert(fan.observe(0, 8000));
+    assert(fan.stopped(187999));
+    assert(!fan.expire(187999));
+    assert(fan.expire(188000));
+    assert(!fan.stopped(188000));
+    assert(!fan.expire(188001));
+    assert(fan.observe(0, 190000));
+    assert(fan.stopped(190000));
+
+    // OFF/preheat/defrost/other mode always wins. Require new CF when
+    // returning to heat even if an idle sample arrived during that state.
+    fan.set_heating_candidate(false);
+    assert(!fan.stopped(190001));
+    assert(fan.observe(0, 191000));
+    assert(!fan.stopped(191000));
+    fan.set_heating_candidate(true);
+    assert(!fan.stopped(192000));
+    assert(fan.observe(0, 193000));
+    assert(fan.stopped(193000));
+
+    // A unit first seen running outside HEAT can still prove CF support.
+    FanFeedback other;
+    assert(other.observe(78, 10));
+    other.set_heating_candidate(true);
+    assert(!other.stopped(20));
+    assert(other.observe(0, 30));
+    assert(other.stopped(30));
+
+    // Unsigned time difference survives millis() wrap.
+    assert(fan.observe(0, UINT32_MAX - 999));
+    assert(fan.stopped(1000));
+    assert(!fan.expire(1000));
+    assert(fan.expire(179000));
+    assert(!fan.stopped(179000));
 }

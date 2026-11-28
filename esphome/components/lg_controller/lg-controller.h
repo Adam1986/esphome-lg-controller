@@ -1243,6 +1243,10 @@ public:
     void loop() override {
         uint32_t millis_now = millis();
 
+        // Expire fan inference even on a passive Slave or a quiet bus.
+        if (fan_feedback_.expire(millis_now) && slave_)
+            refresh_slave_fan_action_(millis_now);
+
         // Track if the RX pin is idle for at least 500 ms to avoid collisions on the bus as much
         // as possible. If there is still a collision, we'll likely both start sending at
         // approximately the same time and the message will hopefully be corrupt (and ignored)
@@ -1523,11 +1527,34 @@ private:
             }
         }
 
+        // Only refine the existing HEATING result in explicit Slave HEAT.
+        // Do not change Master behaviour or override OFF/preheat/defrost.
+        if (slave_) {
+            fan_feedback_.set_heating_candidate(
+                observed_mode == climate::CLIMATE_MODE_HEAT &&
+                action == climate::CLIMATE_ACTION_HEATING);
+            if (fan_feedback_.stopped(millis()))
+                action = climate::CLIMATE_ACTION_IDLE;
+        }
+
         if (this->action == action) {
             return false;
         }
         this->action = action;
         return true;
+    }
+
+    // CF feedback can arrive well after C8. Re-evaluate immediately without
+    // waiting for a further C8 or using optimistic HA-requested mode.
+    void refresh_slave_fan_action_(uint32_t now) {
+        if (!slave_ || !fan_feedback_.heating_candidate) return;
+        const auto next = fan_feedback_.stopped(now)
+            ? climate::CLIMATE_ACTION_IDLE : climate::CLIMATE_ACTION_HEATING;
+        if (this->action == next) return;
+        this->action = next;
+        ESP_LOGD(TAG, "SLAVE HEAT: %s (CF fan feedback / C8 fallback)",
+                 next == climate::CLIMATE_ACTION_IDLE ? "IDLE" : "HEATING");
+        publish_state();
     }
 
     // Slave operating feedback is independent of settings acceptance.
@@ -3551,13 +3578,18 @@ private:
         if (current_power_ != nullptr) {
             current_power_->publish_state(decode_power_uint24_(buffer, 2, 1000.0f));
         }
-        // CF byte 11 closely matches installer fan settings in captured data.
-        // Units/scaling are unverified; this is an opt-in diagnostic only.
-        if (actual_fan_speed_raw_ != nullptr) {
-            const uint8_t raw = buffer[11];
-            if (fan_feedback_.observe(raw))
-                actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
-        }
+        // Learn CF fan capability regardless of optional diagnostic entities.
+        // On unsupported units (only zeros), retain the original C8 logic.
+        const uint8_t raw = buffer[11];
+        const uint32_t now = millis();
+        const bool was_supported = fan_feedback_.supported;
+        const bool supported = fan_feedback_.observe(raw, now);
+        if (slave_ && supported && !was_supported)
+            ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
+                     unsigned(raw));
+        if (supported && actual_fan_speed_raw_ != nullptr)
+            actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
+        refresh_slave_fan_action_(now);
     }
 
     static uint16_t decode_uint16_(const uint8_t* buffer, size_t offset) {
