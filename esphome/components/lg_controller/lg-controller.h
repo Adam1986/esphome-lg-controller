@@ -15,6 +15,7 @@
 #include "floor_console_wire.h"
 #include "lg_vane_mapping.h"
 #include "lg_filter_time.h"
+#include "lg_operating_status.h"
 #include "floor_console_flow.h"
 
 #include "esphome.h"
@@ -365,7 +366,8 @@ class LgController final : public climate::Climate, public uart::UARTDevice, pub
     esphome::binary_sensor::BinarySensor& preheat_;
     esphome::binary_sensor::BinarySensor& outdoor_;
     esphome::binary_sensor::BinarySensor& auto_dry_active_;
-    uint32_t last_outdoor_change_millis_ = 0;
+    OutdoorStatus outdoor_status_;
+    FanFeedback fan_feedback_;
 
     LgSwitch& purifier_;
     LgSwitch& internal_thermistor_;
@@ -1177,12 +1179,15 @@ public:
         if (call.get_mode().has_value()) {
             this->mode = *call.get_mode();
             operation_mode_changed_ = true;
-            if (this->mode == climate::CLIMATE_MODE_OFF) {
-                this->action = climate::CLIMATE_ACTION_OFF;
-            } else if (this->mode == climate::CLIMATE_MODE_FAN_ONLY) {
-                this->action = climate::CLIMATE_ACTION_FAN;
-            } else if (this->action == climate::CLIMATE_ACTION_OFF) {
-                this->action = climate::CLIMATE_ACTION_IDLE;
+            // Slave action describes the last observed C8, not an unaccepted command.
+            if (!slave_) {
+                if (this->mode == climate::CLIMATE_MODE_OFF) {
+                    this->action = climate::CLIMATE_ACTION_OFF;
+                } else if (this->mode == climate::CLIMATE_MODE_FAN_ONLY) {
+                    this->action = climate::CLIMATE_ACTION_FAN;
+                } else if (this->action == climate::CLIMATE_ACTION_OFF) {
+                    this->action = climate::CLIMATE_ACTION_IDLE;
+                }
             }
         }
         if (!slave_ && call.get_mode().has_value() &&
@@ -1251,6 +1256,10 @@ public:
 
     void loop() override {
         uint32_t millis_now = millis();
+
+        // Expire fan inference even on a passive Slave or a quiet bus.
+        if (fan_feedback_.expire(millis_now) && slave_)
+            refresh_slave_fan_action_(millis_now);
 
         // Track if the RX pin is idle for at least 500 ms to avoid collisions on the bus as much
         // as possible. If there is still a collision, we'll likely both start sending at
@@ -1499,18 +1508,18 @@ public:
     }
 
 private:
-    bool set_action_from_status_(bool outdoor_on, bool preheating, bool defrosting, uint8_t temperature_flags) {
+    bool set_action_from_status_(climate::ClimateMode observed_mode, bool outdoor_on, bool preheating, bool defrosting, uint8_t temperature_flags) {
         climate::ClimateAction action = climate::CLIMATE_ACTION_IDLE;
-        if (this->mode == climate::CLIMATE_MODE_OFF) {
+        if (observed_mode == climate::CLIMATE_MODE_OFF) {
             action = climate::CLIMATE_ACTION_OFF;
         } else if (defrosting) {
             action = climate::CLIMATE_ACTION_DEFROSTING;
-        } else if (this->mode == climate::CLIMATE_MODE_FAN_ONLY) {
+        } else if (observed_mode == climate::CLIMATE_MODE_FAN_ONLY) {
             action = climate::CLIMATE_ACTION_FAN;
         } else if (!outdoor_on || preheating) {
             action = climate::CLIMATE_ACTION_IDLE;
         } else {
-            switch (this->mode) {
+            switch (observed_mode) {
                 case climate::CLIMATE_MODE_COOL:
                     action = climate::CLIMATE_ACTION_COOLING;
                     break;
@@ -1532,11 +1541,56 @@ private:
             }
         }
 
+        // Only refine the existing HEATING result in explicit Slave HEAT.
+        // Do not change Master behaviour or override OFF/preheat/defrost.
+        if (slave_) {
+            fan_feedback_.set_heating_candidate(
+                observed_mode == climate::CLIMATE_MODE_HEAT &&
+                action == climate::CLIMATE_ACTION_HEATING);
+            if (fan_feedback_.stopped(millis()))
+                action = climate::CLIMATE_ACTION_IDLE;
+        }
+
         if (this->action == action) {
             return false;
         }
         this->action = action;
         return true;
+    }
+
+    // CF feedback can arrive well after C8. Re-evaluate immediately without
+    // waiting for a further C8 or using optimistic HA-requested mode.
+    void refresh_slave_fan_action_(uint32_t now) {
+        if (!slave_ || !fan_feedback_.heating_candidate) return;
+        const auto next = fan_feedback_.stopped(now)
+            ? climate::CLIMATE_ACTION_IDLE : climate::CLIMATE_ACTION_HEATING;
+        if (this->action == next) return;
+        this->action = next;
+        ESP_LOGD(TAG, "SLAVE HEAT: %s (CF fan feedback / C8 fallback)",
+                 next == climate::CLIMATE_ACTION_IDLE ? "IDLE" : "HEATING");
+        publish_state();
+    }
+
+    // Slave operating feedback is independent of settings acceptance.
+    bool observe_operating_status_(MessageSender sender, const uint8_t* buffer,
+                                   climate::ClimateMode observed_mode) {
+        if (!accepts_operating_status(slave_, buffer[0])) return false;
+        const bool preheating = (buffer[3] & 0x08) != 0;
+        const bool defrosting = (buffer[3] & 0x04) != 0;
+        const bool raw_outdoor = (buffer[5] & 0x04) != 0;
+        defrost_.publish_state(defrosting);
+        preheat_.publish_state(preheating);
+        if (outdoor_status_.observe(raw_outdoor, millis()))
+            outdoor_.publish_state(outdoor_status_.on);
+        if (sender == MessageSender::Unit) {
+            error_code_.publish_state(buffer[11]);
+            if (!auto_dry_.is_internal()) {
+                const bool unit_off = (buffer[1] & 0x02) == 0;
+                auto_dry_active_.publish_state((buffer[10] & 0x10) && unit_off);
+            }
+        }
+        return set_action_from_status_(observed_mode, outdoor_status_.on,
+                                       preheating, defrosting, buffer[7]);
     }
 
     // Sets position of vane index (1-4) to position (0-6).
@@ -2914,6 +2968,17 @@ private:
             }
         }
 
+        // Accept genuine C8 telemetry even when incoming settings are rejected.
+        const bool observed_action_changed = slave_ &&
+            observe_operating_status_(sender, buffer, new_mode);
+        if (slave_ && sender == MessageSender::Master && have_unit_status_for_pipe_ &&
+            (((buffer[3] ^ last_unit_status_for_pipe_[3]) & 0x0C) ||
+             ((buffer[5] ^ last_unit_status_for_pipe_[5]) & 0x04))) {
+            ESP_LOGD(TAG, "SLAVE operating flags differ: A8 b3=%02X b5=%02X, last C8 b3=%02X b5=%02X; using C8",
+                     unsigned(buffer[3]), unsigned(buffer[5]),
+                     unsigned(last_unit_status_for_pipe_[3]), unsigned(last_unit_status_for_pipe_[5]));
+        }
+
         uint8_t fan_val = b >> 5;
         climate::ClimateFanMode new_fan_mode;
         switch (fan_val) {
@@ -2999,6 +3064,7 @@ private:
             }
             ESP_LOGD(TAG, "ignoring incoming settings changes because "
                      "of an outgoing pending change");
+            if (observed_action_changed) publish_state();
             return;
         }
 
@@ -3079,6 +3145,7 @@ private:
                          "(will be accepted after %d times)",
                          change_str.c_str(), repeated_status_count_,
                          times, repeated_status_threshold_);
+                if (observed_action_changed) publish_state();
                 return;
             }
         }
@@ -3091,33 +3158,8 @@ private:
         }
         waiting_for_first_status = false;
 
-        defrost_.publish_state(buffer[3] & 0x4);
-        bool preheating = buffer[3] & 0x8;
-        preheat_.publish_state(preheating);
-
-        if (sender == MessageSender::Unit) {
-            error_code_.publish_state(buffer[11]);
-        }
-
-        // When turning on the outdoor unit, the AC sometimes reports ON => OFF => ON within a
-        // few seconds. No big deal but it causes noisy state changes in HA. Only report OFF if
-        // the last state change was at least 8 seconds ago.
-        bool outdoor_on = buffer[5] & 0x4;
-        bool outdoor_changed = outdoor_.state != outdoor_on;
-        if (outdoor_on) {
-            outdoor_.publish_state(true);
-        } else if (millis() - last_outdoor_change_millis_ > 8000) {
-            outdoor_.publish_state(false);
-        }
-        if (outdoor_changed) {
-            last_outdoor_change_millis_ = millis();
-        }
-
-        if (sender == MessageSender::Unit && !auto_dry_.is_internal()) {
-            bool unit_off = (buffer[1] & 0x2) == 0;
-            bool drying = (buffer[10] & 0x10) && unit_off;
-            auto_dry_active_.publish_state(drying);
-        }
+        // Preserve Master receive semantics; Slave telemetry was processed above.
+        if (!slave_) observe_operating_status_(sender, buffer, this->mode);
 
         bool read_temp = false;
         if (slave_) {
@@ -3140,21 +3182,6 @@ private:
             }
         }
 
-        // NOTE: PR #172 (upstream) had early "ignoring because pending
-        // change/send" returns here (each still updating the action
-        // telemetry before bailing), matching the pre-#168 control flow.
-        // #168's rearchitecture already removed the equivalent guard from
-        // this location -- the same "don't overwrite a pending outgoing
-        // change" concern is now handled earlier in this function via
-        // user_changed_settings_. Reintroducing pending_status_change_/
-        // pending_send_ checks here would be redundant against that and
-        // would double-guard against #168's now-different semantics for
-        // those flags. Net effect of dropping this hunk: action telemetry
-        // simply updates on the next status message instead of this one,
-        // in the narrow case where this one was a self-echo of a pending
-        // change -- not lost, just deferred by one cycle. The normal-path
-        // set_action_from_status_() call below (unconflicted, from #172)
-        // still runs every time.
         if (sender != MessageSender::Slave) {
             memcpy(last_recv_status_, buffer, MsgLen);
         }
@@ -3197,7 +3224,6 @@ private:
         // Slave is updated ONLY from the actual Master A8, by
         // slave_observe_master_sleep_(), not from arbitrary indoor C8 frames.
 
-        set_action_from_status_(outdoor_.state, preheating, defrost_.state, buffer[7]);
         publish_state();
     }
 
@@ -3566,6 +3592,16 @@ private:
         if (current_power_ != nullptr) {
             current_power_->publish_state(decode_power_uint24_(buffer, 2, 1000.0f));
         }
+        // Learn CF fan capability regardless of optional diagnostic entities.
+        // On unsupported units (only zeros), retain the original C8 logic.
+        const uint8_t raw = buffer[11];
+        const uint32_t now = millis();
+        const bool was_supported = fan_feedback_.supported;
+        const bool supported = fan_feedback_.observe(raw, now);
+        if (slave_ && supported && !was_supported)
+            ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
+                     unsigned(raw));
+        refresh_slave_fan_action_(now);
     }
 
     static uint16_t decode_uint16_(const uint8_t* buffer, size_t offset) {
