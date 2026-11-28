@@ -30,7 +30,7 @@ struct OutdoorStatus {
 
 // CF byte 11 is empirical fan feedback, not a direct Thermo ON/OFF bit.
 // Zero alone cannot distinguish an unsupported field from a stopped fan.
-// Learn support only from nonzero indoor feedback in this boot.
+// Learn support from nonzero indoor feedback; retain only capability across reboots.
 struct FanFeedback {
     static constexpr uint32_t MAX_AGE_MS = 180000u;
     bool supported = false;
@@ -38,6 +38,12 @@ struct FanFeedback {
     bool sample_valid = false;
     uint8_t raw = 0;
     uint32_t sampled_at = 0;
+
+    // The saved bit is capability only, never a saved speed or valid sample.
+    void restore_support(bool learned) {
+        supported = learned;
+        sample_valid = false;
+    }
 
     bool observe(uint8_t value, uint32_t now) {
         if (value != 0) supported = true;
