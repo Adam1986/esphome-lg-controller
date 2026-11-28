@@ -3625,7 +3625,8 @@ private:
         const uint8_t raw = buffer[11];
         const uint32_t now = millis();
         const bool was_supported = fan_feedback_.supported;
-        const bool supported = fan_feedback_.observe(raw, now);
+        const bool telemetry_populated = buffer[9] != 0 || buffer[10] != 0;
+        const bool supported = fan_feedback_.observe(raw, now, telemetry_populated);
         if (slave_ && supported && !was_supported)
             ESP_LOGI(TAG, "SLAVE HEAT: detected indoor CF fan feedback (raw=%u)",
                      unsigned(raw));
@@ -3644,8 +3645,11 @@ private:
             }
         }
         // Diagnostics expose the actual CF byte even before support is learned.
-        // A zero on an unsupported unit is ambiguous; it must not establish
-        // fan capability or override C8 heating status.
+        // A zero in an unpopulated CF telemetry group is not proof of a
+        // stopped fan and cannot override the genuine C8 action.
+        if (slave_ && raw == 0 && !telemetry_populated && supported &&
+            fan_feedback_.heating_candidate)
+            ESP_LOGD(TAG, "SLAVE HEAT: CF fan/temperature fields empty; using C8 status");
         if (actual_fan_speed_raw_ != nullptr) {
             actual_fan_speed_raw_->publish_state(static_cast<float>(raw));
             actual_fan_speed_raw_published_ = true;
